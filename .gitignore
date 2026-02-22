@@ -1,0 +1,19 @@
+# Roblox place files
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+
+# Wally packages (installed via wally install)
+Packages/
+
+# Rojo sourcemap
+sourcemap.json
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

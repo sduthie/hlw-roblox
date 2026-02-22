@@ -1,0 +1,43 @@
+{
+  "name": "HLW-Roblox",
+  "tree": {
+    "$className": "DataModel",
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$path": "src/ServerScriptService"
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$path": "src/StarterPlayerScripts"
+      }
+    },
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/ReplicatedStorage/Shared"
+      },
+      "Packages": {
+        "$path": "Packages"
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FilteringEnabled": true
+      }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "Future"
+      }
+    }
+  }
+}
