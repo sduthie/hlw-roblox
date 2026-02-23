@@ -23,6 +23,8 @@ type CreepInstance = {
 	Health: number,
 	MaxHealth: number,
 	Model: Model?,
+	Hexed: boolean?,
+	HexExpires: number?,
 }
 
 --------------------------------------------------------------------------------
@@ -314,6 +316,16 @@ function CreepService:_runMovementLoop()
 				continue
 			end
 
+			-- Hex stun: skip movement while hexed
+			if creep.Hexed and creep.HexExpires then
+				if os.clock() < creep.HexExpires then
+					continue
+				else
+					creep.Hexed = false
+					creep.HexExpires = nil
+				end
+			end
+
 			local laneKey = _getLaneKey(creep)
 			local waypoints = MapConfig.LANE_WAYPOINTS[laneKey]
 			if not waypoints then
@@ -437,6 +449,84 @@ function CreepService:_onCreepKilledByGate(creep: CreepInstance)
 		if bountyPerPlayer > 0 then
 			for _, player in defenders do
 				IncomeService:AddGold(player, bountyPerPlayer)
+			end
+		end
+	end
+
+	-- Notify clients
+	self.Client.CreepDied:FireAll({
+		Id = creep.Id,
+		Position = creep.Position,
+		CreepId = creep.CreepId,
+	})
+
+	self:_destroyCreep(creep.Id)
+end
+
+--------------------------------------------------------------------------------
+-- Public: Get active creeps (for HeroCombatService iteration)
+--------------------------------------------------------------------------------
+
+function CreepService:GetActiveCreeps(): { [number]: CreepInstance }
+	return self._activeCreeps
+end
+
+--------------------------------------------------------------------------------
+-- Public: Damage a creep from hero or ability. Returns true if killed.
+--------------------------------------------------------------------------------
+
+function CreepService:DamageCreep(creepId: number, amount: number, killerPlayer: Player?): boolean
+	local creep = self._activeCreeps[creepId]
+	if not creep then
+		return false
+	end
+
+	creep.Health -= amount
+	_updateHealthBar(creep)
+
+	if creep.Health <= 0 then
+		self:_onCreepKilledByHero(creep, killerPlayer)
+		return true
+	end
+	return false
+end
+
+--------------------------------------------------------------------------------
+-- Public: Hex (stun) a creep for a duration
+--------------------------------------------------------------------------------
+
+function CreepService:HexCreep(creepId: number, duration: number)
+	local creep = self._activeCreeps[creepId]
+	if not creep then
+		return
+	end
+	creep.Hexed = true
+	creep.HexExpires = os.clock() + duration
+end
+
+--------------------------------------------------------------------------------
+-- Creep killed by hero/ability
+--------------------------------------------------------------------------------
+
+function CreepService:_onCreepKilledByHero(creep: CreepInstance, killerPlayer: Player?)
+	local creepDef = CreepData[creep.CreepId]
+
+	-- Award XP and bounty gold to killer
+	if killerPlayer and creepDef then
+		local okHero, heroService = pcall(function()
+			return Knit.GetService("HeroService")
+		end)
+		if okHero and heroService then
+			heroService:AddXP(killerPlayer, Constants.HERO_XP_PER_CREEP_KILL or 30)
+		end
+
+		local bounty = math.floor(creepDef.Cost * (Constants.HERO_KILL_BOUNTY_PERCENT or 0.25))
+		if bounty > 0 then
+			local okIncome, incomeService = pcall(function()
+				return Knit.GetService("IncomeService")
+			end)
+			if okIncome and incomeService then
+				incomeService:AddGold(killerPlayer, bounty)
 			end
 		end
 	end

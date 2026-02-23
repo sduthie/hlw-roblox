@@ -186,6 +186,24 @@ function GameService:_startGame()
 
 	-- Notify all clients of fresh lives
 	self.Client.LivesUpdated:FireAll(self._teamLives)
+
+	-- Start hero combat
+	local okCombat, heroCombatService = pcall(function()
+		return Knit.GetService("HeroCombatService")
+	end)
+	if okCombat and heroCombatService then
+		heroCombatService:StartCombat()
+	end
+
+	-- Apply passive abilities for all players
+	local okAbility, abilityService = pcall(function()
+		return Knit.GetService("AbilityService")
+	end)
+	if okAbility and abilityService then
+		for _, player in Players:GetPlayers() do
+			abilityService:ApplyPassives(player)
+		end
+	end
 end
 
 function GameService:_resetGame()
@@ -215,7 +233,25 @@ function GameService:_resetGame()
 		end
 	end
 
-	-- 4. Reset shop state
+	-- 4. Stop combat
+	local okCombat, heroCombatService = pcall(function()
+		return Knit.GetService("HeroCombatService")
+	end)
+	if okCombat and heroCombatService then
+		heroCombatService:StopCombat()
+	end
+
+	-- 5. Reset abilities
+	local okAbility, abilityService = pcall(function()
+		return Knit.GetService("AbilityService")
+	end)
+	if okAbility and abilityService then
+		for _, player in Players:GetPlayers() do
+			abilityService:ResetPlayer(player)
+		end
+	end
+
+	-- 6. Reset shop state
 	local okShop, shopService = pcall(function()
 		return Knit.GetService("ShopService")
 	end)

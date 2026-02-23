@@ -91,6 +91,8 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 8,
 				ManaCost = 65,
 				UnlockLevel = 1,
+				Type = "Heal",
+				Value = 200,
 			},
 			{
 				Name = "Divine Shield",
@@ -98,6 +100,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 30,
 				ManaCost = 0,
 				UnlockLevel = 3,
+				Type = "SelfBuff",
+				Value = 0,
+				Duration = 5,
 			},
 			{
 				Name = "Devotion Aura",
@@ -105,6 +110,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 0,
 				ManaCost = 0,
 				UnlockLevel = 5,
+				Type = "Buff",
+				IsPassive = true,
+				Value = 5,
 			},
 			{
 				Name = "Resurrection",
@@ -112,6 +120,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 120,
 				ManaCost = 200,
 				UnlockLevel = 10,
+				-- Type = nil (unimplemented)
 			},
 		},
 	},
@@ -184,6 +193,11 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 10,
 				ManaCost = 75,
 				UnlockLevel = 1,
+				Type = "Damage",
+				Radius = 15,
+				DamagePerTick = 40,
+				TickInterval = 1,
+				Duration = 3,
 			},
 			{
 				Name = "Summon Elemental",
@@ -191,6 +205,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 60,
 				ManaCost = 125,
 				UnlockLevel = 3,
+				-- Type = nil (unimplemented)
 			},
 			{
 				Name = "Brilliance Aura",
@@ -198,6 +213,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 0,
 				ManaCost = 0,
 				UnlockLevel = 5,
+				Type = "Buff",
+				IsPassive = true,
+				Value = 2,
 			},
 			{
 				Name = "Mass Teleport",
@@ -205,6 +223,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 90,
 				ManaCost = 100,
 				UnlockLevel = 10,
+				-- Type = nil (unimplemented)
 			},
 		},
 	},
@@ -317,6 +336,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 6,
 				ManaCost = 75,
 				UnlockLevel = 1,
+				Type = "Damage",
+				Value = 150,
+				Range = 20,
 			},
 			{
 				Name = "Unholy Aura",
@@ -324,6 +346,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 0,
 				ManaCost = 0,
 				UnlockLevel = 3,
+				Type = "Buff",
+				IsPassive = true,
+				Value = 4,
 			},
 			{
 				Name = "Death Pact",
@@ -331,6 +356,8 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 45,
 				ManaCost = 50,
 				UnlockLevel = 5,
+				Type = "Heal",
+				Value = 300,
 			},
 			{
 				Name = "Animate Dead",
@@ -338,6 +365,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 120,
 				ManaCost = 175,
 				UnlockLevel = 10,
+				-- Type = nil (unimplemented)
 			},
 		},
 	},
@@ -420,6 +448,8 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 8,
 				ManaCost = 90,
 				UnlockLevel = 1,
+				Type = "Heal",
+				Value = 250,
 			},
 			{
 				Name = "Hex",
@@ -427,6 +457,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 15,
 				ManaCost = 70,
 				UnlockLevel = 3,
+				Type = "Stun",
+				Duration = 4,
+				Range = 20,
 			},
 			{
 				Name = "Serpent Ward",
@@ -434,6 +467,11 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 12,
 				ManaCost = 50,
 				UnlockLevel = 5,
+				Type = "Ward",
+				DamagePerTick = 20,
+				TickInterval = 1,
+				Radius = 10,
+				Duration = 15,
 			},
 			{
 				Name = "Big Bad Voodoo",
@@ -441,6 +479,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 150,
 				ManaCost = 200,
 				UnlockLevel = 10,
+				-- Type = nil (unimplemented)
 			},
 		},
 	},
@@ -533,6 +572,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 10,
 				ManaCost = 75,
 				UnlockLevel = 1,
+				Type = "SelfBuff",
+				Value = 8,
+				Duration = 6,
 			},
 			{
 				Name = "Mirror Image",
@@ -540,6 +582,7 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 20,
 				ManaCost = 80,
 				UnlockLevel = 3,
+				-- Type = nil (unimplemented)
 			},
 			{
 				Name = "Critical Strike",
@@ -547,6 +590,9 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 0,
 				ManaCost = 0,
 				UnlockLevel = 5,
+				Type = "Buff",
+				IsPassive = true,
+				Value = 25,
 			},
 			{
 				Name = "Bladestorm",
@@ -554,6 +600,11 @@ local HeroData: { [string]: Types.HeroDef } = {
 				Cooldown = 120,
 				ManaCost = 150,
 				UnlockLevel = 10,
+				Type = "Damage",
+				Radius = 10,
+				DamagePerTick = 67,
+				TickInterval = 1,
+				Duration = 3,
 			},
 		},
 	},

@@ -86,6 +86,7 @@ function HeroService:AddXP(player: Player, amount: number)
 	local userId = player.UserId
 	local currentXP = (self._playerXP[userId] or 0) + amount
 	local currentLevel = self._playerLevels[userId] or 1
+	local didLevelUp = false
 
 	while currentLevel < Constants.HERO_MAX_LEVEL do
 		local xpNeeded = Constants.HERO_XP_PER_LEVEL[currentLevel]
@@ -94,11 +95,29 @@ function HeroService:AddXP(player: Player, amount: number)
 		end
 		currentXP -= xpNeeded
 		currentLevel += 1
+		didLevelUp = true
 		self.Client.HeroLevelUp:Fire(player, currentLevel)
 	end
 
 	self._playerXP[userId] = currentXP
 	self._playerLevels[userId] = currentLevel
+
+	-- On level-up, recompute stats and re-apply passives
+	if didLevelUp then
+		local okCombat, heroCombatService = pcall(function()
+			return Knit.GetService("HeroCombatService")
+		end)
+		if okCombat and heroCombatService then
+			heroCombatService:RecomputeStats(player)
+		end
+
+		local okAbility, abilityService = pcall(function()
+			return Knit.GetService("AbilityService")
+		end)
+		if okAbility and abilityService then
+			abilityService:ApplyPassives(player)
+		end
+	end
 end
 
 function HeroService:GetHeroId(player: Player): string?

@@ -201,6 +201,66 @@ function MapService:_buildMap()
 			Parent = mapFolder,
 		})
 	end
+
+	-- 7. Lane path visualization
+	self:_createLanePaths(mapFolder)
+end
+
+-- ---------------------------------------------------------------------------
+-- Lane path visualization
+-- ---------------------------------------------------------------------------
+
+function MapService:_createLanePaths(mapFolder: Folder)
+	local laneFolder = Instance.new("Folder")
+	laneFolder.Name = "LanePaths"
+	laneFolder.Parent = mapFolder
+
+	local laneTeamMap = {
+		ToTeam2 = 1, -- Team 1's creeps walk this path (colored blue)
+		ToTeam1 = 2, -- Team 2's creeps walk this path (colored red)
+	}
+
+	for laneName, teamId in laneTeamMap do
+		local waypoints = MapConfig.LANE_WAYPOINTS[laneName]
+		if not waypoints or #waypoints < 2 then
+			continue
+		end
+
+		local teamColor = MapConfig.TEAM_COLORS[teamId]
+
+		-- Also draw from spawn to first waypoint
+		local spawnPos = MapConfig.SPAWN_POSITIONS[teamId]
+		local allPoints = { spawnPos }
+		for _, wp in waypoints do
+			table.insert(allPoints, wp)
+		end
+
+		for i = 1, #allPoints - 1 do
+			local p1 = Vector3.new(allPoints[i].X, 0.1, allPoints[i].Z)
+			local p2 = Vector3.new(allPoints[i + 1].X, 0.1, allPoints[i + 1].Z)
+
+			local midpoint = (p1 + p2) / 2
+			local length = (p2 - p1).Magnitude
+
+			if length < 0.1 then
+				continue
+			end
+
+			local strip = Instance.new("Part")
+			strip.Name = laneName .. "_Path" .. tostring(i)
+			-- Size: length along the Z (forward) axis via lookAt, 2 studs wide, 0.1 tall
+			strip.Size = Vector3.new(2, 0.1, length)
+			strip.CFrame = CFrame.lookAt(midpoint, p2)
+			strip.Color = teamColor
+			strip.Material = Enum.Material.Neon
+			strip.Transparency = 0.6
+			strip.Anchored = true
+			strip.CanCollide = false
+			strip.TopSurface = Enum.SurfaceType.Smooth
+			strip.BottomSurface = Enum.SurfaceType.Smooth
+			strip.Parent = laneFolder
+		end
+	end
 end
 
 -- ---------------------------------------------------------------------------

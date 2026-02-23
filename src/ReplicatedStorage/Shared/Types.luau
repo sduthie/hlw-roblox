@@ -59,6 +59,36 @@ export type AbilityDef = {
 	Cooldown: number,
 	ManaCost: number,
 	UnlockLevel: number,
+	-- Combat effect fields (nil = unimplemented ability)
+	Type: string?, -- "Damage"|"Heal"|"Buff"|"SelfBuff"|"Ward"|"Stun"
+	IsPassive: boolean?,
+	Range: number?,
+	Radius: number?,
+	Value: number?,
+	Duration: number?,
+	DamagePerTick: number?,
+	TickInterval: number?,
+}
+
+export type BuffInstance = {
+	Name: string,
+	StatKey: string,
+	Value: number,
+	ExpiresAt: number,
+}
+
+export type HeroCombatState = {
+	MaxHealth: number,
+	Mana: number,
+	MaxMana: number,
+	AttackDamage: number,
+	Armor: number,
+	MoveSpeed: number,
+	CooldownReduction: number,
+	AttackRange: number,
+	AttackCooldown: number,
+	LastAttackTime: number,
+	Buffs: { BuffInstance },
 }
 
 export type CreepDef = {

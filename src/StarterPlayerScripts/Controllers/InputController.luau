@@ -58,8 +58,8 @@ function InputController:_bindActions()
 end
 
 function InputController:_onAbility(slotIndex: number)
-	-- TODO: route to HeroController to activate ability
-	print("[HLW] Ability", slotIndex, "pressed")
+	local AbilityService = Knit.GetService("AbilityService")
+	AbilityService:CastAbility(slotIndex)
 end
 
 function InputController:_onToggleShop()

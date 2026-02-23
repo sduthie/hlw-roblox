@@ -70,6 +70,12 @@ function HUDController:KnitStart()
 		self:_onBaseDamaged(teamId, amount)
 	end)
 
+	-- Connect hero combat signals for floating damage
+	local HeroCombatService = Knit.GetService("HeroCombatService")
+	HeroCombatService.HeroAttacked:Connect(function(attackerUserId: number, creepId: number, damage: number, creepPosition: Vector3, killed: boolean)
+		self:_showFloatingDamage(creepPosition, damage, killed)
+	end)
+
 	-- Fetch initial values
 	local initialGold = IncomeService:GetGold()
 	local initialIncome = IncomeService:GetIncome()
@@ -420,6 +426,56 @@ function HUDController:_onBaseDamaged(teamId: number, _amount: number)
 			CameraController:ShakeCamera()
 		end
 	end
+end
+
+function HUDController:_showFloatingDamage(worldPosition: Vector3, damage: number, killed: boolean)
+	-- Create a BillboardGui in workspace for 3D floating text
+	local part = Instance.new("Part")
+	part.Name = "DamageFloat"
+	part.Size = Vector3.new(0.1, 0.1, 0.1)
+	part.Position = worldPosition + Vector3.new(0, 3, 0)
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Parent = workspace
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "DamageGui"
+	gui.Size = UDim2.fromOffset(80, 30)
+	gui.StudsOffset = Vector3.new(0, 0, 0)
+	gui.AlwaysOnTop = true
+	gui.Parent = part
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = "-" .. math.floor(damage)
+	label.TextColor3 = if killed then Color3.fromRGB(255, 100, 50) else Color3.fromRGB(255, 255, 100)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextStrokeTransparency = 0.3
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.Parent = gui
+
+	-- Animate upward and fade
+	local startPos = part.Position
+	local endPos = startPos + Vector3.new(0, 4, 0)
+
+	local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local positionTween = TweenService:Create(part, tweenInfo, {
+		Position = endPos,
+	})
+	local fadeTween = TweenService:Create(label, tweenInfo, {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	})
+
+	positionTween:Play()
+	fadeTween:Play()
+
+	fadeTween.Completed:Connect(function()
+		part:Destroy()
+	end)
 end
 
 return HUDController

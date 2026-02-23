@@ -100,4 +100,23 @@ Constants.CREEP_UPDATE_RATE = 10 -- server updates per second
 -- Items
 Constants.MAX_ITEMS_PER_PLAYER = 6
 
+-- Hero Combat
+Constants.HERO_ATTACK_RANGE = 12
+Constants.HERO_ATTACK_RATE = 1.0 -- seconds between auto-attacks
+Constants.HERO_COMBAT_UPDATE_RATE = 10 -- Hz, match creep loop
+
+-- Hero XP & Bounty
+Constants.HERO_XP_PER_CREEP_KILL = 30
+Constants.HERO_KILL_BOUNTY_PERCENT = 0.25
+
+-- Level Scaling
+Constants.HP_PER_LEVEL = 20
+Constants.DAMAGE_PER_LEVEL = 2
+Constants.ARMOR_PER_LEVEL = 0.5
+
+-- Mana
+Constants.BASE_MANA = 100
+Constants.MANA_REGEN = 1 -- per second
+Constants.MANA_PER_LEVEL = 10
+
 return Constants
