@@ -5,6 +5,42 @@ export type CreepId = string
 export type ItemId = string
 export type TeamId = number
 
+export type GearPieceDef = {
+	Name: string,
+	PartType: string, -- "Block" | "Ball" | "Cylinder" | "Wedge"
+	Size: Vector3,
+	Offset: CFrame,
+	Color: Color3,
+	Material: Enum.Material,
+	Transparency: number?,
+	AttachTo: string?, -- body part name to weld to (default: HumanoidRootPart)
+}
+
+export type WeaponToolDef = {
+	Name: string,
+	HandleSize: Vector3,
+	HandleColor: Color3,
+	HandleMaterial: Enum.Material,
+	BladeSize: Vector3?,
+	BladeColor: Color3?,
+	BladeMaterial: Enum.Material?,
+	BladeOffset: CFrame?,
+	GripPos: Vector3?,
+}
+
+export type HeroAppearanceDef = {
+	BodyColors: {
+		HeadColor3: Color3,
+		TorsoColor3: Color3,
+		LeftArmColor3: Color3,
+		RightArmColor3: Color3,
+		LeftLegColor3: Color3,
+		RightLegColor3: Color3,
+	},
+	GearPieces: { GearPieceDef },
+	WeaponTool: WeaponToolDef?,
+}
+
 export type HeroDef = {
 	Id: HeroId,
 	Name: string,
@@ -14,6 +50,7 @@ export type HeroDef = {
 	BaseArmor: number,
 	MoveSpeed: number,
 	Abilities: { AbilityDef },
+	Appearance: HeroAppearanceDef?,
 }
 
 export type AbilityDef = {

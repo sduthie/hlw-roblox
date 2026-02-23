@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
+local Constants = require(ReplicatedStorage.Shared.Constants)
 local HeroData = require(ReplicatedStorage.Shared.HeroData)
 
 local GOLD_HIGHLIGHT = Color3.fromHex("#FFD700")
@@ -18,9 +19,15 @@ local HeroController = Knit.CreateController({
 })
 
 HeroController._selectedHeroId = nil :: string?
+HeroController._confirmedHeroId = nil :: string?
 HeroController._screenGui = nil :: ScreenGui?
 HeroController._heroSelectFrame = nil :: Frame?
 HeroController._heroCards = {} :: { [string]: Frame }
+HeroController._lastClickTime = 0 :: number
+HeroController._lastClickHeroId = nil :: string?
+HeroController._hintLabel = nil :: TextLabel?
+
+local DOUBLE_CLICK_WINDOW = 0.4 -- seconds
 
 function HeroController:KnitInit()
 	self:_createHeroSelectUI()
@@ -43,14 +50,59 @@ function HeroController:KnitStart()
 	end)
 end
 
+function HeroController:_onCardClicked(heroId: string)
+	if not HeroData[heroId] then
+		return
+	end
+
+	-- Don't allow re-selection if already confirmed
+	if self._confirmedHeroId then
+		return
+	end
+
+	local now = tick()
+	local isDoubleClick = (self._lastClickHeroId == heroId) and (now - self._lastClickTime < DOUBLE_CLICK_WINDOW)
+
+	if isDoubleClick then
+		-- Double-click: confirm selection
+		self:_confirmHero(heroId)
+		self._lastClickHeroId = nil
+		self._lastClickTime = 0
+	else
+		-- Single click: preview highlight only (no server call)
+		self._lastClickHeroId = heroId
+		self._lastClickTime = now
+		self:_previewHero(heroId)
+	end
+end
+
+function HeroController:_previewHero(heroId: string)
+	self._selectedHeroId = heroId
+	self:_highlightCard(heroId)
+	self:_showHint(true)
+end
+
+function HeroController:_confirmHero(heroId: string)
+	self._confirmedHeroId = heroId
+	self._selectedHeroId = heroId
+
+	-- Fire server remote
+	local heroService = Knit.GetService("HeroService")
+	heroService:SelectHero(heroId)
+
+	-- Update UI to show confirmed state
+	self:_highlightCard(heroId)
+	self:_showHint(false)
+	self:_showConfirmedIndicator(heroId)
+end
+
 function HeroController:SelectHero(heroId: string)
 	if not HeroData[heroId] then
 		warn("[HLW] Invalid hero:", heroId)
 		return
 	end
 
-	local heroService = Knit.GetService("HeroService")
-	heroService:SelectHero(heroId)
+	self:_confirmHero(heroId)
 end
 
 function HeroController:GetSelectedHeroId(): string?
@@ -67,8 +119,13 @@ function HeroController:_onPhaseChanged(phase: string)
 		return
 	end
 
-	if phase == "HERO_SELECT" then
+	if phase == Constants.PHASE_HERO_SELECT then
+		self._confirmedHeroId = nil
+		self._selectedHeroId = nil
+		self._lastClickHeroId = nil
+		self._lastClickTime = 0
 		self:_resetHighlights()
+		self:_showHint(false)
 		frame.Visible = true
 	else
 		frame.Visible = false
@@ -107,16 +164,6 @@ function HeroController:_highlightCard(heroId: string)
 		local stroke = selectedCard:FindFirstChildOfClass("UIStroke")
 		if stroke then
 			stroke.Transparency = 0
-		end
-	end
-end
-
-function HeroController:_resetHighlights()
-	for _, card in self._heroCards do
-		local stroke = card:FindFirstChildOfClass("UIStroke")
-		if stroke then
-			stroke.Color = TRANSPARENT_STROKE
-			stroke.Transparency = 1
 		end
 	end
 end
@@ -287,10 +334,81 @@ function HeroController:_createHeroCard(heroId: string, heroDef: any): Frame
 	clickButton.Parent = card
 
 	clickButton.MouseButton1Click:Connect(function()
-		self:SelectHero(heroId)
+		self:_onCardClicked(heroId)
 	end)
 
 	return card
+end
+
+function HeroController:_showHint(visible: boolean)
+	local overlay = self._heroSelectFrame
+	if not overlay then
+		return
+	end
+
+	if not self._hintLabel then
+		local hint = Instance.new("TextLabel")
+		hint.Name = "HintLabel"
+		hint.Size = UDim2.new(1, 0, 0, 30)
+		hint.Position = UDim2.new(0, 0, 1, -50)
+		hint.AnchorPoint = Vector2.new(0, 0)
+		hint.BackgroundTransparency = 1
+		hint.Text = "Double-click to select"
+		hint.Font = Enum.Font.GothamMedium
+		hint.TextSize = 16
+		hint.TextColor3 = Color3.fromRGB(200, 200, 200)
+		hint.TextXAlignment = Enum.TextXAlignment.Center
+		hint.Parent = overlay
+		self._hintLabel = hint
+	end
+
+	self._hintLabel.Visible = visible
+end
+
+function HeroController:_showConfirmedIndicator(heroId: string)
+	local card = self._heroCards[heroId]
+	if not card then
+		return
+	end
+
+	-- Check if indicator already exists
+	if card:FindFirstChild("ConfirmedLabel") then
+		return
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "ConfirmedLabel"
+	label.Size = UDim2.new(1, 0, 0, 24)
+	label.Position = UDim2.new(0, 0, 1, -24)
+	label.BackgroundColor3 = Color3.fromRGB(0, 180, 60)
+	label.BackgroundTransparency = 0.2
+	label.Text = "SELECTED"
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 14
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.ZIndex = 11
+	label.Parent = card
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 4)
+	corner.Parent = label
+end
+
+function HeroController:_resetHighlights()
+	for _, card in self._heroCards do
+		local stroke = card:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = TRANSPARENT_STROKE
+			stroke.Transparency = 1
+		end
+
+		-- Remove confirmed indicators
+		local confirmed = card:FindFirstChild("ConfirmedLabel")
+		if confirmed then
+			confirmed:Destroy()
+		end
+	end
 end
 
 return HeroController

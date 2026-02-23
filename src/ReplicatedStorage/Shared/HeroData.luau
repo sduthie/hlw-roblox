@@ -11,6 +11,79 @@ local HeroData: { [string]: Types.HeroDef } = {
 		BaseDamage = 35,
 		BaseArmor = 5,
 		MoveSpeed = 16,
+		Appearance = {
+			BodyColors = {
+				HeadColor3 = Color3.fromRGB(245, 205, 48),
+				TorsoColor3 = Color3.fromRGB(245, 205, 48),
+				LeftArmColor3 = Color3.fromRGB(195, 175, 100),
+				RightArmColor3 = Color3.fromRGB(195, 175, 100),
+				LeftLegColor3 = Color3.fromRGB(195, 175, 100),
+				RightLegColor3 = Color3.fromRGB(195, 175, 100),
+			},
+			GearPieces = {
+				-- Visor helm
+				{
+					Name = "Helm",
+					PartType = "Block",
+					Size = Vector3.new(1.3, 0.6, 1.3),
+					Offset = CFrame.new(0, 0.9, 0),
+					Color = Color3.fromRGB(245, 205, 48),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Chest plate
+				{
+					Name = "ChestPlate",
+					PartType = "Block",
+					Size = Vector3.new(2.2, 2.2, 1.4),
+					Offset = CFrame.new(0, 0, 0),
+					Color = Color3.fromRGB(245, 205, 48),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Shield on back
+				{
+					Name = "Shield",
+					PartType = "Block",
+					Size = Vector3.new(1.6, 2.0, 0.3),
+					Offset = CFrame.new(0, 0, 0.8),
+					Color = Color3.fromRGB(245, 205, 48),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Left shoulder pad
+				{
+					Name = "LeftShoulder",
+					PartType = "Block",
+					Size = Vector3.new(1.4, 0.5, 1.4),
+					Offset = CFrame.new(-1.5, 0.8, 0),
+					Color = Color3.fromRGB(245, 205, 48),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Right shoulder pad
+				{
+					Name = "RightShoulder",
+					PartType = "Block",
+					Size = Vector3.new(1.4, 0.5, 1.4),
+					Offset = CFrame.new(1.5, 0.8, 0),
+					Color = Color3.fromRGB(245, 205, 48),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+			},
+			WeaponTool = {
+				Name = "Holy Hammer",
+				HandleSize = Vector3.new(0.4, 4.0, 0.4),
+				HandleColor = Color3.fromRGB(120, 80, 40),
+				HandleMaterial = Enum.Material.Wood,
+				BladeSize = Vector3.new(1.2, 1.2, 0.8),
+				BladeColor = Color3.fromRGB(245, 205, 48),
+				BladeMaterial = Enum.Material.Metal,
+				BladeOffset = CFrame.new(0, 2.0, 0),
+				GripPos = Vector3.new(0, -1.5, 0),
+			},
+		},
 		Abilities = {
 			{
 				Name = "Holy Light",
@@ -51,6 +124,59 @@ local HeroData: { [string]: Types.HeroDef } = {
 		BaseDamage = 45,
 		BaseArmor = 2,
 		MoveSpeed = 16,
+		Appearance = {
+			BodyColors = {
+				HeadColor3 = Color3.fromRGB(245, 205, 48),
+				TorsoColor3 = Color3.fromRGB(35, 75, 180),
+				LeftArmColor3 = Color3.fromRGB(35, 75, 180),
+				RightArmColor3 = Color3.fromRGB(35, 75, 180),
+				LeftLegColor3 = Color3.fromRGB(35, 75, 180),
+				RightLegColor3 = Color3.fromRGB(35, 75, 180),
+			},
+			GearPieces = {
+				-- Wizard hat brim
+				{
+					Name = "HatBrim",
+					PartType = "Cylinder",
+					Size = Vector3.new(0.3, 2.0, 2.0),
+					Offset = CFrame.new(0, 0.8, 0) * CFrame.Angles(0, 0, math.rad(90)),
+					Color = Color3.fromRGB(25, 50, 140),
+					Material = Enum.Material.Fabric,
+					AttachTo = "Head",
+				},
+				-- Wizard hat cone
+				{
+					Name = "HatCone",
+					PartType = "Block",
+					Size = Vector3.new(0.9, 1.5, 0.9),
+					Offset = CFrame.new(0, 1.6, 0),
+					Color = Color3.fromRGB(25, 50, 140),
+					Material = Enum.Material.Fabric,
+					AttachTo = "Head",
+				},
+				-- Robe skirt (below torso)
+				{
+					Name = "RobeSkirt",
+					PartType = "Block",
+					Size = Vector3.new(2.2, 1.5, 1.4),
+					Offset = CFrame.new(0, -1.8, 0),
+					Color = Color3.fromRGB(35, 75, 180),
+					Material = Enum.Material.Fabric,
+					AttachTo = "Torso",
+				},
+			},
+			WeaponTool = {
+				Name = "Arcane Staff",
+				HandleSize = Vector3.new(0.35, 5.0, 0.35),
+				HandleColor = Color3.fromRGB(90, 55, 30),
+				HandleMaterial = Enum.Material.Wood,
+				BladeSize = Vector3.new(0.8, 0.8, 0.8),
+				BladeColor = Color3.fromRGB(50, 120, 255),
+				BladeMaterial = Enum.Material.Neon,
+				BladeOffset = CFrame.new(0, 2.8, 0),
+				GripPos = Vector3.new(0, -1.5, 0),
+			},
+		},
 		Abilities = {
 			{
 				Name = "Blizzard",
@@ -91,6 +217,99 @@ local HeroData: { [string]: Types.HeroDef } = {
 		BaseDamage = 40,
 		BaseArmor = 4,
 		MoveSpeed = 16,
+		Appearance = {
+			BodyColors = {
+				HeadColor3 = Color3.fromRGB(60, 60, 60),
+				TorsoColor3 = Color3.fromRGB(50, 50, 55),
+				LeftArmColor3 = Color3.fromRGB(50, 50, 55),
+				RightArmColor3 = Color3.fromRGB(50, 50, 55),
+				LeftLegColor3 = Color3.fromRGB(40, 40, 45),
+				RightLegColor3 = Color3.fromRGB(40, 40, 45),
+			},
+			GearPieces = {
+				-- Skull helm
+				{
+					Name = "SkullHelm",
+					PartType = "Block",
+					Size = Vector3.new(1.3, 0.8, 1.3),
+					Offset = CFrame.new(0, 0.8, 0),
+					Color = Color3.fromRGB(50, 50, 55),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Left horn
+				{
+					Name = "LeftHorn",
+					PartType = "Block",
+					Size = Vector3.new(0.25, 0.8, 0.25),
+					Offset = CFrame.new(-0.5, 1.2, 0) * CFrame.Angles(0, 0, math.rad(20)),
+					Color = Color3.fromRGB(35, 35, 35),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Right horn
+				{
+					Name = "RightHorn",
+					PartType = "Block",
+					Size = Vector3.new(0.25, 0.8, 0.25),
+					Offset = CFrame.new(0.5, 1.2, 0) * CFrame.Angles(0, 0, math.rad(-20)),
+					Color = Color3.fromRGB(35, 35, 35),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Dark plate chest
+				{
+					Name = "DarkPlate",
+					PartType = "Block",
+					Size = Vector3.new(2.2, 2.2, 1.4),
+					Offset = CFrame.new(0, 0, 0),
+					Color = Color3.fromRGB(50, 50, 55),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Neon rune accent (chest)
+				{
+					Name = "RuneAccent",
+					PartType = "Block",
+					Size = Vector3.new(0.6, 0.6, 0.05),
+					Offset = CFrame.new(0, 0.2, -0.75),
+					Color = Color3.fromRGB(0, 255, 80),
+					Material = Enum.Material.Neon,
+					AttachTo = "Torso",
+				},
+				-- Left shoulder guard
+				{
+					Name = "LeftShoulder",
+					PartType = "Block",
+					Size = Vector3.new(1.4, 0.6, 1.4),
+					Offset = CFrame.new(-1.5, 0.8, 0),
+					Color = Color3.fromRGB(50, 50, 55),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Right shoulder guard
+				{
+					Name = "RightShoulder",
+					PartType = "Block",
+					Size = Vector3.new(1.4, 0.6, 1.4),
+					Offset = CFrame.new(1.5, 0.8, 0),
+					Color = Color3.fromRGB(50, 50, 55),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+			},
+			WeaponTool = {
+				Name = "Runeblade",
+				HandleSize = Vector3.new(0.35, 1.2, 0.35),
+				HandleColor = Color3.fromRGB(40, 40, 40),
+				HandleMaterial = Enum.Material.Metal,
+				BladeSize = Vector3.new(0.25, 3.5, 0.1),
+				BladeColor = Color3.fromRGB(0, 255, 80),
+				BladeMaterial = Enum.Material.Neon,
+				BladeOffset = CFrame.new(0, 2.4, 0),
+				GripPos = Vector3.new(0, -1.0, 0),
+			},
+		},
 		Abilities = {
 			{
 				Name = "Death Coil",
@@ -131,6 +350,69 @@ local HeroData: { [string]: Types.HeroDef } = {
 		BaseDamage = 38,
 		BaseArmor = 3,
 		MoveSpeed = 18,
+		Appearance = {
+			BodyColors = {
+				HeadColor3 = Color3.fromRGB(40, 100, 180),
+				TorsoColor3 = Color3.fromRGB(40, 100, 180),
+				LeftArmColor3 = Color3.fromRGB(40, 100, 180),
+				RightArmColor3 = Color3.fromRGB(40, 100, 180),
+				LeftLegColor3 = Color3.fromRGB(40, 100, 180),
+				RightLegColor3 = Color3.fromRGB(40, 100, 180),
+			},
+			GearPieces = {
+				-- Voodoo mask
+				{
+					Name = "VoodooMask",
+					PartType = "Block",
+					Size = Vector3.new(1.2, 1.0, 0.4),
+					Offset = CFrame.new(0, 0.2, -0.7),
+					Color = Color3.fromRGB(140, 100, 50),
+					Material = Enum.Material.Wood,
+					AttachTo = "Head",
+				},
+				-- Left feather
+				{
+					Name = "LeftFeather",
+					PartType = "Block",
+					Size = Vector3.new(0.15, 1.2, 0.15),
+					Offset = CFrame.new(-0.4, 1.2, 0) * CFrame.Angles(0, 0, math.rad(15)),
+					Color = Color3.fromRGB(220, 40, 40),
+					Material = Enum.Material.Fabric,
+					AttachTo = "Head",
+				},
+				-- Right feather
+				{
+					Name = "RightFeather",
+					PartType = "Block",
+					Size = Vector3.new(0.15, 1.2, 0.15),
+					Offset = CFrame.new(0.4, 1.2, 0) * CFrame.Angles(0, 0, math.rad(-15)),
+					Color = Color3.fromRGB(0, 200, 60),
+					Material = Enum.Material.Fabric,
+					AttachTo = "Head",
+				},
+				-- Tribal necklace
+				{
+					Name = "Necklace",
+					PartType = "Cylinder",
+					Size = Vector3.new(0.2, 1.8, 1.8),
+					Offset = CFrame.new(0, 0.8, 0) * CFrame.Angles(0, 0, math.rad(90)),
+					Color = Color3.fromRGB(200, 180, 100),
+					Material = Enum.Material.Wood,
+					AttachTo = "Torso",
+				},
+			},
+			WeaponTool = {
+				Name = "Glaive",
+				HandleSize = Vector3.new(0.3, 4.5, 0.3),
+				HandleColor = Color3.fromRGB(100, 70, 35),
+				HandleMaterial = Enum.Material.Wood,
+				BladeSize = Vector3.new(0.8, 1.8, 0.1),
+				BladeColor = Color3.fromRGB(180, 180, 190),
+				BladeMaterial = Enum.Material.Metal,
+				BladeOffset = CFrame.new(0, 2.8, 0),
+				GripPos = Vector3.new(0, -1.5, 0),
+			},
+		},
 		Abilities = {
 			{
 				Name = "Healing Wave",
@@ -171,6 +453,79 @@ local HeroData: { [string]: Types.HeroDef } = {
 		BaseDamage = 50,
 		BaseArmor = 3,
 		MoveSpeed = 20,
+		Appearance = {
+			BodyColors = {
+				HeadColor3 = Color3.fromRGB(245, 205, 48),
+				TorsoColor3 = Color3.fromRGB(140, 20, 20),
+				LeftArmColor3 = Color3.fromRGB(140, 20, 20),
+				RightArmColor3 = Color3.fromRGB(140, 20, 20),
+				LeftLegColor3 = Color3.fromRGB(35, 30, 30),
+				RightLegColor3 = Color3.fromRGB(35, 30, 30),
+			},
+			GearPieces = {
+				-- Kabuto helmet
+				{
+					Name = "Kabuto",
+					PartType = "Block",
+					Size = Vector3.new(1.4, 0.6, 1.5),
+					Offset = CFrame.new(0, 0.8, 0),
+					Color = Color3.fromRGB(140, 20, 20),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Kabuto crest
+				{
+					Name = "KabutoCrest",
+					PartType = "Block",
+					Size = Vector3.new(0.1, 0.8, 0.5),
+					Offset = CFrame.new(0, 1.3, 0),
+					Color = Color3.fromRGB(200, 170, 30),
+					Material = Enum.Material.Metal,
+					AttachTo = "Head",
+				},
+				-- Do (chest plate)
+				{
+					Name = "DoChestPlate",
+					PartType = "Block",
+					Size = Vector3.new(2.2, 2.0, 1.3),
+					Offset = CFrame.new(0, 0, 0),
+					Color = Color3.fromRGB(140, 20, 20),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Left Sode (shoulder guard)
+				{
+					Name = "LeftSode",
+					PartType = "Block",
+					Size = Vector3.new(1.3, 0.5, 1.3),
+					Offset = CFrame.new(-1.5, 0.8, 0),
+					Color = Color3.fromRGB(140, 20, 20),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+				-- Right Sode (shoulder guard)
+				{
+					Name = "RightSode",
+					PartType = "Block",
+					Size = Vector3.new(1.3, 0.5, 1.3),
+					Offset = CFrame.new(1.5, 0.8, 0),
+					Color = Color3.fromRGB(140, 20, 20),
+					Material = Enum.Material.Metal,
+					AttachTo = "Torso",
+				},
+			},
+			WeaponTool = {
+				Name = "Katana",
+				HandleSize = Vector3.new(0.3, 1.4, 0.3),
+				HandleColor = Color3.fromRGB(60, 30, 15),
+				HandleMaterial = Enum.Material.Wood,
+				BladeSize = Vector3.new(0.15, 3.5, 0.08),
+				BladeColor = Color3.fromRGB(210, 210, 220),
+				BladeMaterial = Enum.Material.Metal,
+				BladeOffset = CFrame.new(0, 2.5, 0),
+				GripPos = Vector3.new(0, -1.0, 0),
+			},
+		},
 		Abilities = {
 			{
 				Name = "Wind Walk",

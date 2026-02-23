@@ -70,6 +70,15 @@ function HeroService:SelectHero(player: Player, heroId: string): boolean
 	self._playerLevels[userId] = 1
 	self._playerXP[userId] = 0
 	self.Client.HeroSelected:FireAll(userId, heroId)
+
+	-- Apply hero appearance to the player's character
+	local ok, appearanceService = pcall(function()
+		return Knit.GetService("HeroAppearanceService")
+	end)
+	if ok and appearanceService then
+		appearanceService:ApplyHeroAppearance(player, heroId)
+	end
+
 	return true
 end
 
@@ -116,6 +125,10 @@ function HeroService:AssignDefaults()
 		return
 	end
 
+	local ok, appearanceService = pcall(function()
+		return Knit.GetService("HeroAppearanceService")
+	end)
+
 	for _, player in Players:GetPlayers() do
 		local userId = player.UserId
 		if self._playerHeroes[userId] == nil then
@@ -125,6 +138,11 @@ function HeroService:AssignDefaults()
 			self._playerLevels[userId] = 1
 			self._playerXP[userId] = 0
 			self.Client.HeroSelected:FireAll(userId, heroId)
+
+			-- Apply appearance for auto-assigned heroes
+			if ok and appearanceService then
+				appearanceService:ApplyHeroAppearance(player, heroId)
+			end
 		end
 	end
 end
@@ -235,6 +253,16 @@ end
 --------------------------------------------------------------------------------
 
 function HeroService:CleanupAll()
+	-- Clear hero appearances for all players
+	local ok, appearanceService = pcall(function()
+		return Knit.GetService("HeroAppearanceService")
+	end)
+	if ok and appearanceService then
+		for _, player in Players:GetPlayers() do
+			appearanceService:ClearAppearance(player)
+		end
+	end
+
 	-- Destroy all hero models
 	for userId, model in self._heroModels do
 		if model then
