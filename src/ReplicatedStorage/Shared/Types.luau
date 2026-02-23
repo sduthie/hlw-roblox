@@ -62,4 +62,29 @@ export type GameState = {
 	Players: { [number]: PlayerState }, -- keyed by Player.UserId
 }
 
+export type CreepInstance = {
+	Id: number,
+	CreepId: CreepId,
+	OwnerId: number, -- Player.UserId who sent this creep
+	TeamId: TeamId,
+	TargetTeamId: TeamId,
+	LaneIndex: number,
+	WaypointIndex: number,
+	Position: Vector3,
+	Health: number,
+	MaxHealth: number,
+	Model: Model?,
+}
+
+export type SaveData = {
+	Wins: number,
+	Losses: number,
+	GamesPlayed: number,
+	FavoriteHero: string,
+	TotalCreepsSent: number,
+	TotalGoldEarned: number,
+	_sessionLock: string?,
+	_saveVersion: number,
+}
+
 return nil

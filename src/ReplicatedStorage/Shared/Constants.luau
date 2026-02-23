@@ -72,4 +72,32 @@ Constants.WAVE_SIZE = 4 -- number of creeps per send
 -- Shop
 Constants.SHOP_CATEGORIES = { "Creeps", "Items", "Upgrades" }
 
+-- Balance: Base Gate
+Constants.GATE_BASE_DPS = 25
+Constants.GATE_RANGE = 40
+Constants.GATE_MAX_HP = 500
+
+-- Balance: Tiered Base Damage (per creep reaching base, indexed by tier)
+Constants.BASE_DAMAGE_BY_TIER = { 1, 3, 7 }
+
+-- Balance: Kill Bounty (defending team earns % of creep cost when their gate/hero kills a creep)
+Constants.KILL_BOUNTY_PERCENT = 0.25
+
+-- Balance: Momentum Streaks (consecutive waves with at least 1 survivor)
+Constants.STREAK_THRESHOLD_1 = 3 -- +1 bonus damage per creep
+Constants.STREAK_BONUS_1 = 1
+Constants.STREAK_THRESHOLD_2 = 5 -- +2 bonus damage per creep
+Constants.STREAK_BONUS_2 = 2
+
+-- Balance: TownHall Passives
+Constants.STRONGHOLD_GATE_BONUS_DPS = 10 -- T2: your gate gains +10 DPS
+Constants.BLACK_CITADEL_CREEP_HP_BONUS = 0.20 -- T3: your creeps gain +20% HP
+
+-- Creep Movement
+Constants.WAYPOINT_REACH_DISTANCE = 3
+Constants.CREEP_UPDATE_RATE = 10 -- server updates per second
+
+-- Items
+Constants.MAX_ITEMS_PER_PLAYER = 6
+
 return Constants
