@@ -18,13 +18,13 @@ GamePhases.Configs = {
 		Duration = 0, -- no fixed duration; waits for players + countdown
 		NextPhase = Constants.PHASE_HERO_SELECT,
 		AutoTransition = false,
-		MinPlayers = 2,
+		MinPlayers = 1,
 	},
 	[Constants.PHASE_HERO_SELECT] = {
 		Duration = Constants.HERO_PICK_TIME, -- 30s
 		NextPhase = Constants.PHASE_PLAYING,
 		AutoTransition = true,
-		MinPlayers = 2,
+		MinPlayers = 1,
 	},
 	[Constants.PHASE_PLAYING] = {
 		Duration = 0, -- no fixed duration; ends when a team hits 0 lives

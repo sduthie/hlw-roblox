@@ -54,7 +54,7 @@ function HUDController:KnitStart()
 		self:_onPhaseChanged(phase, timer)
 	end)
 
-	GameService.TimerSync:Connect(function(timer: number)
+	GameService.TimerSync:Connect(function(_phase: string, timer: number)
 		self:_updateTimer(timer)
 	end)
 
