@@ -202,8 +202,144 @@ function MapService:_buildMap()
 		})
 	end
 
-	-- 7. Lane path visualization
+	-- 7. Shop buildings
+	self:_createShopBuildings(mapFolder)
+
+	-- 8. Lane boundary walls
+	self:_createLaneWalls(mapFolder)
+
+	-- 9. Lane path visualization
 	self:_createLanePaths(mapFolder)
+end
+
+-- ---------------------------------------------------------------------------
+-- Shop buildings
+-- ---------------------------------------------------------------------------
+
+function MapService:_createShopBuildings(mapFolder: Folder)
+	local shopFolder = Instance.new("Folder")
+	shopFolder.Name = "Shops"
+	shopFolder.Parent = mapFolder
+
+	for teamId = 1, Constants.TEAM_COUNT do
+		local pos = MapConfig.SHOP_POSITIONS[teamId]
+		local teamColor = MapConfig.TEAM_COLORS[teamId]
+
+		-- Main building body
+		local building = createPart({
+			Name = "Shop_Team" .. tostring(teamId),
+			Size = Vector3.new(10, 8, 8),
+			Position = pos + Vector3.new(0, 4, 0),
+			Color = teamColor,
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = true,
+			Parent = shopFolder,
+		})
+		CollectionService:AddTag(building, "Shop")
+		building:SetAttribute("TeamId", teamId)
+
+		-- Roof (wider, darker)
+		local darkerColor = Color3.new(
+			teamColor.R * 0.6,
+			teamColor.G * 0.6,
+			teamColor.B * 0.6
+		)
+		createPart({
+			Name = "Roof_Team" .. tostring(teamId),
+			Size = Vector3.new(12, 1.5, 10),
+			Position = pos + Vector3.new(0, 8.75, 0),
+			Color = darkerColor,
+			Material = Enum.Material.Wood,
+			CanCollide = false,
+			Parent = shopFolder,
+		})
+
+		-- Counter (front ledge)
+		createPart({
+			Name = "Counter_Team" .. tostring(teamId),
+			Size = Vector3.new(8, 1, 2),
+			Position = pos + Vector3.new(0, 2, 5),
+			Color = Color3.fromRGB(139, 90, 43),
+			Material = Enum.Material.Wood,
+			CanCollide = true,
+			Parent = shopFolder,
+		})
+
+		-- Gold accent trim along roof edge
+		createPart({
+			Name = "Trim_Team" .. tostring(teamId),
+			Size = Vector3.new(12, 0.4, 10),
+			Position = pos + Vector3.new(0, 8, 0),
+			Color = Color3.fromRGB(255, 215, 0),
+			Material = Enum.Material.Neon,
+			Transparency = 0.4,
+			CanCollide = false,
+			Parent = shopFolder,
+		})
+
+		-- Billboard sign with "SHOP" text
+		local signGui = Instance.new("BillboardGui")
+		signGui.Name = "ShopSign"
+		signGui.Size = UDim2.fromOffset(120, 40)
+		signGui.StudsOffset = Vector3.new(0, 6, 0)
+		signGui.AlwaysOnTop = true
+		signGui.Parent = building
+
+		local signLabel = Instance.new("TextLabel")
+		signLabel.Size = UDim2.fromScale(1, 1)
+		signLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		signLabel.BackgroundTransparency = 0.3
+		signLabel.Text = "SHOP"
+		signLabel.Font = Enum.Font.GothamBold
+		signLabel.TextSize = 28
+		signLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+		signLabel.TextStrokeTransparency = 0.3
+		signLabel.TextStrokeColor3 = Color3.fromRGB(100, 80, 0)
+		signLabel.Parent = signGui
+
+		local signCorner = Instance.new("UICorner")
+		signCorner.CornerRadius = UDim.new(0, 6)
+		signCorner.Parent = signLabel
+
+		-- ProximityPrompt for interaction
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ObjectText = "Shop"
+		prompt.ActionText = "Open Shop"
+		prompt.HoldDuration = 0
+		prompt.MaxActivationDistance = 14
+		prompt.KeyboardKeyCode = Enum.KeyCode.F
+		prompt.Parent = building
+	end
+end
+
+-- ---------------------------------------------------------------------------
+-- Lane boundary walls
+-- ---------------------------------------------------------------------------
+
+function MapService:_createLaneWalls(mapFolder: Folder)
+	local wallFolder = Instance.new("Folder")
+	wallFolder.Name = "LaneWalls"
+	wallFolder.Parent = mapFolder
+
+	local halfWidth = MapConfig.LANE_HALF_WIDTH
+	local wallHeight = MapConfig.LANE_WALL_HEIGHT
+	local wallThickness = MapConfig.LANE_WALL_THICKNESS
+
+	-- Walls run along the Z-axis for the full ground length
+	local groundZ = MapConfig.GROUND_SIZE.Z
+	local wallLength = groundZ - 20 -- slightly shorter than ground
+
+	for _, xPos in { -halfWidth, halfWidth } do
+		createPart({
+			Name = "LaneWall_X" .. tostring(xPos),
+			Size = Vector3.new(wallThickness, wallHeight, wallLength),
+			Position = Vector3.new(xPos, wallHeight / 2, 0),
+			Color = Color3.fromRGB(120, 110, 100),
+			Material = Enum.Material.Brick,
+			CanCollide = true,
+			Parent = wallFolder,
+		})
+	end
 end
 
 -- ---------------------------------------------------------------------------

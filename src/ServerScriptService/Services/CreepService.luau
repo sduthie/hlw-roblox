@@ -7,6 +7,7 @@ local Knit = require(ReplicatedStorage.Packages.Knit)
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local CreepData = require(ReplicatedStorage.Shared.CreepData)
 local MapConfig = require(ReplicatedStorage.Shared.MapConfig)
+local CreepModels = require(ReplicatedStorage.Shared.CreepModels)
 local RemoteValidator = require(ReplicatedStorage.Shared.RemoteValidator)
 
 -- Type alias for the creep instances we track at runtime.
@@ -25,6 +26,10 @@ type CreepInstance = {
 	Model: Model?,
 	Hexed: boolean?,
 	HexExpires: number?,
+	LastAttackTime: number?,
+	DamageMultiplier: number?,
+	SpeedMultiplier: number?,
+	LastHitByPlayer: Player?,
 }
 
 --------------------------------------------------------------------------------
@@ -38,6 +43,7 @@ local CreepService = Knit.CreateService({
 		CreepSpawned = Knit.CreateSignal(),
 		CreepDied = Knit.CreateSignal(),
 		CreepReachedBase = Knit.CreateSignal(),
+		CreepKillReward = Knit.CreateSignal(),
 	},
 })
 
@@ -48,6 +54,8 @@ local CreepService = Knit.CreateService({
 CreepService._nextCreepId = 1 :: number
 CreepService._activeCreeps = {} :: { [number]: CreepInstance }
 CreepService._creepFolder = nil :: Folder?
+CreepService._aiActive = false :: boolean
+CreepService._aiStartTime = 0 :: number
 
 --------------------------------------------------------------------------------
 -- Constants (local shortcuts)
@@ -61,6 +69,14 @@ local GATE_RANGE = Constants.GATE_RANGE
 local GATE_BASE_DPS = Constants.GATE_BASE_DPS
 local KILL_BOUNTY_PERCENT = Constants.KILL_BOUNTY_PERCENT
 local BLACK_CITADEL_CREEP_HP_BONUS = Constants.BLACK_CITADEL_CREEP_HP_BONUS
+
+-- Creep-vs-creep combat
+local CREEP_AGGRO_RANGE = 8
+local CREEP_ATTACK_COOLDOWN = 1
+
+-- Separation: creeps push apart when closer than this
+local CREEP_SEPARATION_DISTANCE = 4
+local CREEP_SEPARATION_STRENGTH = 6 -- studs/sec push speed
 
 --------------------------------------------------------------------------------
 -- Client method
@@ -139,9 +155,28 @@ function CreepService:_spawnWave(player: Player, creepId: string, teamId: number
 		hpMultiplier = 1 + BLACK_CITADEL_CREEP_HP_BONUS
 	end
 
+	-- Apply minion upgrade bonuses
+	local dmgMultiplier = 1
+	local speedMultiplier = 1
+	local okUpgrade, upgradeService = pcall(function()
+		return Knit.GetService("UpgradeService")
+	end)
+	if okUpgrade and upgradeService then
+		local hpPct = upgradeService:GetCreepHpPct(player)
+		hpMultiplier = hpMultiplier + (hpPct / 100)
+
+		local dmgPct = upgradeService:GetCreepDmgPct(player)
+		dmgMultiplier = 1 + (dmgPct / 100)
+
+		local speedPct = upgradeService:GetCreepSpeedPct(player)
+		speedMultiplier = 1 + (speedPct / 100)
+	end
+
 	for i = 1, WAVE_SIZE do
 		task.delay((i - 1) * CREEP_SPAWN_INTERVAL, function()
-			self:_createCreep(creepId, player.UserId, teamId, targetTeamId, laneKey, hpMultiplier)
+			local creep = self:_createCreep(creepId, player.UserId, teamId, targetTeamId, laneKey, hpMultiplier)
+			creep.DamageMultiplier = dmgMultiplier
+			creep.SpeedMultiplier = speedMultiplier
 		end)
 	end
 end
@@ -163,29 +198,24 @@ function CreepService:_createCreep(
 	self._nextCreepId += 1
 
 	local baseHealth = math.floor(creepDef.Health * hpMultiplier)
-	local spawnPosition = MapConfig.SPAWN_POSITIONS[teamId]
+	local baseSpawn = MapConfig.SPAWN_POSITIONS[teamId]
+	-- Randomize X within ±12 studs so creeps spread across the lane width
+	local xOffset = (math.random() * 24) - 12
+	local spawnPosition = Vector3.new(baseSpawn.X + xOffset, baseSpawn.Y, baseSpawn.Z)
 
-	-- Build the model ---------------------------------------------------------
-	local model = Instance.new("Model")
+	-- Build the model using CreepModels module --------------------------------
+	local teamColor = MapConfig.TEAM_COLORS[teamId]
+	local model = CreepModels.build(creepId, teamColor, spawnPosition)
 	model.Name = "Creep_" .. id
 
-	-- Body part
-	local part = Instance.new("Part")
-	part.Name = "Body"
-	part.Size = Vector3.new(3, 3, 3)
-	part.Color = MapConfig.TEAM_COLORS[teamId]
-	part.Material = Enum.Material.SmoothPlastic
-	part.Anchored = true
-	part.CanCollide = false
-	part.CFrame = CFrame.new(spawnPosition)
-	part.Parent = model
-	model.PrimaryPart = part
+	local part = model.PrimaryPart :: Part
 
-	-- Health bar BillboardGui
+	-- Health bar BillboardGui (attached to Body)
+	local bodySize = part.Size
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HealthBar"
 	gui.Size = UDim2.fromOffset(60, 14)
-	gui.StudsOffset = Vector3.new(0, 2.5, 0)
+	gui.StudsOffset = Vector3.new(0, bodySize.Y / 2 + 1.5, 0)
 	gui.AlwaysOnTop = true
 	gui.Parent = part
 
@@ -301,14 +331,99 @@ local function _getLaneKey(creep: CreepInstance): string
 end
 
 --------------------------------------------------------------------------------
+-- Move entire multi-part model to a new position
+--------------------------------------------------------------------------------
+
+local function _moveModel(creep: CreepInstance, newPosition: Vector3)
+	local model = creep.Model
+	if not model then
+		return
+	end
+	local body = model:FindFirstChild("Body") :: Part?
+	if not body then
+		return
+	end
+	local delta = newPosition - body.Position
+	for _, child in model:GetChildren() do
+		if child:IsA("BasePart") then
+			child.CFrame = child.CFrame + delta
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Movement loop (10 Hz)
 --------------------------------------------------------------------------------
+
+function CreepService:_computeSeparation(creep: CreepInstance, dt: number): Vector3
+	local pushX, pushZ = 0, 0
+
+	for _, other in self._activeCreeps do
+		if other.Id == creep.Id then
+			continue
+		end
+		local dx = creep.Position.X - other.Position.X
+		local dz = creep.Position.Z - other.Position.Z
+		local dist = math.sqrt(dx * dx + dz * dz)
+		if dist < CREEP_SEPARATION_DISTANCE and dist > 0.01 then
+			-- Stronger push the closer they are
+			local factor = (CREEP_SEPARATION_DISTANCE - dist) / CREEP_SEPARATION_DISTANCE
+			pushX += (dx / dist) * factor
+			pushZ += (dz / dist) * factor
+		end
+	end
+
+	-- Normalize and scale by strength and dt
+	local mag = math.sqrt(pushX * pushX + pushZ * pushZ)
+	if mag > 0.01 then
+		local scale = CREEP_SEPARATION_STRENGTH * dt / mag
+		return Vector3.new(pushX * scale, 0, pushZ * scale)
+	end
+	return Vector3.zero
+end
+
+function CreepService:_findNearestEnemy(creep: CreepInstance): CreepInstance?
+	local bestDist = CREEP_AGGRO_RANGE
+	local bestTarget: CreepInstance? = nil
+
+	for _, other in self._activeCreeps do
+		if other.TeamId == creep.TeamId then
+			continue
+		end
+		local dist = (other.Position - creep.Position).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestTarget = other
+		end
+	end
+
+	return bestTarget
+end
+
+function CreepService:_onCreepKilledByCreep(creep: CreepInstance)
+	-- If a player recently damaged this creep, give them assist/kill credit
+	if creep.LastHitByPlayer then
+		self:_onCreepKilledByHero(creep, creep.LastHitByPlayer)
+		return
+	end
+
+	-- Notify clients (no bounty for creep-on-creep kills)
+	self.Client.CreepDied:FireAll({
+		Id = creep.Id,
+		Position = creep.Position,
+		CreepId = creep.CreepId,
+	})
+
+	self:_destroyCreep(creep.Id)
+end
 
 function CreepService:_runMovementLoop()
 	local dt = 1 / CREEP_UPDATE_RATE
 
 	while true do
 		task.wait(dt)
+
+		local now = os.clock()
 
 		for id, creep in self._activeCreeps do
 			local creepDef = CreepData[creep.CreepId]
@@ -318,7 +433,7 @@ function CreepService:_runMovementLoop()
 
 			-- Hex stun: skip movement while hexed
 			if creep.Hexed and creep.HexExpires then
-				if os.clock() < creep.HexExpires then
+				if now < creep.HexExpires then
 					continue
 				else
 					creep.Hexed = false
@@ -350,6 +465,29 @@ function CreepService:_runMovementLoop()
 				end
 			end
 
+			-- Creep-vs-creep combat ----------------------------------------------
+			local enemy = self:_findNearestEnemy(creep)
+			if enemy then
+				local lastAtk = creep.LastAttackTime or 0
+				if now - lastAtk >= CREEP_ATTACK_COOLDOWN then
+					creep.LastAttackTime = now
+					local dmg = (creepDef.Damage or 10) * (creep.DamageMultiplier or 1)
+					enemy.Health -= dmg
+					_updateHealthBar(enemy)
+
+					if enemy.Health <= 0 then
+						self:_onCreepKilledByCreep(enemy)
+					end
+				end
+				-- Engaged in combat — apply separation so creeps spread out
+				local sep = self:_computeSeparation(creep, dt)
+				if sep.Magnitude > 0.01 then
+					creep.Position = creep.Position + sep
+				end
+				_moveModel(creep, creep.Position)
+				continue
+			end
+
 			-- Movement -----------------------------------------------------------
 			local currentWaypoint = waypoints[creep.WaypointIndex]
 			if not currentWaypoint then
@@ -358,7 +496,9 @@ function CreepService:_runMovementLoop()
 				continue
 			end
 
-			local offset = currentWaypoint - creep.Position
+			-- Each creep keeps its own X offset; navigate toward waypoint's Z
+			local targetPos = Vector3.new(creep.Position.X, currentWaypoint.Y, currentWaypoint.Z)
+			local offset = targetPos - creep.Position
 			local distToWaypoint = offset.Magnitude
 
 			if distToWaypoint <= WAYPOINT_REACH_DISTANCE then
@@ -371,9 +511,9 @@ function CreepService:_runMovementLoop()
 					continue
 				end
 			else
-				-- Move toward waypoint
+				-- Move toward waypoint (primarily along Z, keeping X offset)
 				local direction = offset.Unit
-				local moveDistance = creepDef.MoveSpeed * dt
+				local moveDistance = creepDef.MoveSpeed * (creep.SpeedMultiplier or 1) * dt
 				-- Clamp so we don't overshoot
 				if moveDistance > distToWaypoint then
 					moveDistance = distToWaypoint
@@ -381,14 +521,14 @@ function CreepService:_runMovementLoop()
 				creep.Position = creep.Position + direction * moveDistance
 			end
 
-			-- Update model CFrame
-			local model = creep.Model
-			if model then
-				local body = model:FindFirstChild("Body") :: Part?
-				if body then
-					body.CFrame = CFrame.new(creep.Position)
-				end
+			-- Separation from nearby creeps while walking
+			local sep = self:_computeSeparation(creep, dt)
+			if sep.Magnitude > 0.01 then
+				creep.Position = creep.Position + sep * 0.5 -- lighter push while moving
 			end
+
+			-- Update model position (all parts move together)
+			_moveModel(creep, creep.Position)
 		end
 	end
 end
@@ -429,6 +569,12 @@ end
 --------------------------------------------------------------------------------
 
 function CreepService:_onCreepKilledByGate(creep: CreepInstance)
+	-- If a player recently damaged this creep, give them hero kill credit instead
+	if creep.LastHitByPlayer then
+		self:_onCreepKilledByHero(creep, creep.LastHitByPlayer)
+		return
+	end
+
 	local creepDef = CreepData[creep.CreepId]
 	if not creepDef then
 		self:_destroyCreep(creep.Id)
@@ -484,6 +630,11 @@ function CreepService:DamageCreep(creepId: number, amount: number, killerPlayer:
 	creep.Health -= amount
 	_updateHealthBar(creep)
 
+	-- Track which player last hit this creep for assist credit
+	if killerPlayer then
+		creep.LastHitByPlayer = killerPlayer
+	end
+
 	if creep.Health <= 0 then
 		self:_onCreepKilledByHero(creep, killerPlayer)
 		return true
@@ -511,24 +662,33 @@ end
 function CreepService:_onCreepKilledByHero(creep: CreepInstance, killerPlayer: Player?)
 	local creepDef = CreepData[creep.CreepId]
 
+	local bountyGold = 0
+	local xpGained = 0
+
 	-- Award XP and bounty gold to killer
 	if killerPlayer and creepDef then
+		xpGained = Constants.HERO_XP_PER_CREEP_KILL or 30
 		local okHero, heroService = pcall(function()
 			return Knit.GetService("HeroService")
 		end)
 		if okHero and heroService then
-			heroService:AddXP(killerPlayer, Constants.HERO_XP_PER_CREEP_KILL or 30)
+			heroService:AddXP(killerPlayer, xpGained)
 		end
 
-		local bounty = math.floor(creepDef.Cost * (Constants.HERO_KILL_BOUNTY_PERCENT or 0.25))
-		if bounty > 0 then
+		bountyGold = math.floor(creepDef.Cost * (Constants.HERO_KILL_BOUNTY_PERCENT or 0.25))
+		if bountyGold > 0 then
 			local okIncome, incomeService = pcall(function()
 				return Knit.GetService("IncomeService")
 			end)
 			if okIncome and incomeService then
-				incomeService:AddGold(killerPlayer, bounty)
+				incomeService:AddGold(killerPlayer, bountyGold)
 			end
 		end
+	end
+
+	-- Fire kill reward signal so client shows gold/XP floating text
+	if killerPlayer and (bountyGold > 0 or xpGained > 0) then
+		self.Client.CreepKillReward:Fire(killerPlayer, creep.Position, bountyGold, xpGained)
 	end
 
 	-- Notify clients
@@ -557,6 +717,69 @@ function CreepService:_destroyCreep(creepId: number)
 	end
 
 	self._activeCreeps[creepId] = nil
+end
+
+--------------------------------------------------------------------------------
+-- AI Wave System — spawns creeps for teams with no human players
+--------------------------------------------------------------------------------
+
+local AI_WAVE_INTERVAL = 12
+local AI_WAVE_SIZE = 4
+local AI_SPAWN_DELAY = 0.4
+
+-- Escalation schedule: { maxElapsed, creepId }
+local AI_ESCALATION = {
+	{ 60, "Footman" },
+	{ 120, "Grunt" },
+	{ 240, "Knight" },
+	-- After 240s → Abomination (fallback)
+}
+
+local function _pickAICreep(elapsed: number): string
+	for _, entry in AI_ESCALATION do
+		if elapsed < entry[1] then
+			return entry[2]
+		end
+	end
+	return "Abomination"
+end
+
+function CreepService:StartAIWaves()
+	self._aiActive = true
+	self._aiStartTime = os.clock()
+	task.spawn(function()
+		self:_runAIWaveLoop()
+	end)
+end
+
+function CreepService:StopAIWaves()
+	self._aiActive = false
+end
+
+function CreepService:_runAIWaveLoop()
+	while self._aiActive do
+		task.wait(AI_WAVE_INTERVAL)
+		if not self._aiActive then
+			break
+		end
+
+		local elapsed = os.clock() - self._aiStartTime
+		local creepId = _pickAICreep(elapsed)
+
+		-- Spawn AI waves for BOTH teams so creeps clash in the lane
+		for teamId = 1, 2 do
+			local targetTeamId = if teamId == 1 then 2 else 1
+			local laneKey = if targetTeamId == 2 then "ToTeam2" else "ToTeam1"
+
+			for i = 1, AI_WAVE_SIZE do
+				task.delay((i - 1) * AI_SPAWN_DELAY, function()
+					if self._aiActive then
+						self:_createCreep(creepId, 0, teamId, targetTeamId, laneKey, 1)
+					end
+				end)
+			end
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
