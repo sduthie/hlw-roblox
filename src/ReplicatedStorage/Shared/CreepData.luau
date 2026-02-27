@@ -14,6 +14,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 10,
 		Armor = 1,
 		MoveSpeed = 14,
+		Ability = {
+			Name = "Shield Bash",
+			Type = "Stun",
+			Cooldown = 8,
+			Value = 1.5, -- stun duration in seconds
+			Radius = 0,
+			Duration = 0,
+		},
 	},
 	Rifleman = {
 		Id = "Rifleman",
@@ -25,6 +33,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 18,
 		Armor = 0,
 		MoveSpeed = 14,
+		Ability = {
+			Name = "Volley",
+			Type = "BonusDamage",
+			Cooldown = 6,
+			Value = 18, -- extra damage dealt to each secondary target
+			Radius = 10, -- search radius for secondary targets
+			Duration = 0,
+		},
 	},
 	Grunt = {
 		Id = "Grunt",
@@ -36,6 +52,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 12,
 		Armor = 2,
 		MoveSpeed = 12,
+		Ability = {
+			Name = "War Cry",
+			Type = "BuffAllies",
+			Cooldown = 12,
+			Value = 0.3, -- +30% damage multiplier
+			Radius = 12,
+			Duration = 4,
+		},
 	},
 
 	-- Tier 2: Stronghold
@@ -49,6 +73,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 28,
 		Armor = 4,
 		MoveSpeed = 16,
+		Ability = {
+			Name = "Charge",
+			Type = "Charge",
+			Cooldown = 10,
+			Value = 2, -- next hit deals 2x damage
+			Radius = 0,
+			Duration = 0,
+		},
 	},
 	Priest = {
 		Id = "Priest",
@@ -60,6 +92,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 15,
 		Armor = 1,
 		MoveSpeed = 14,
+		Ability = {
+			Name = "Heal Wave",
+			Type = "Heal",
+			Cooldown = 8,
+			Value = 40, -- HP healed per ally
+			Radius = 12,
+			Duration = 0,
+		},
 	},
 	Raider = {
 		Id = "Raider",
@@ -71,6 +111,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 22,
 		Armor = 3,
 		MoveSpeed = 18,
+		Ability = {
+			Name = "Ensnare",
+			Type = "Slow",
+			Cooldown = 10,
+			Value = 0.5, -- 50% slow factor
+			Radius = 0,
+			Duration = 3,
+		},
 	},
 
 	-- Tier 3: Black Citadel
@@ -84,6 +132,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 45,
 		Armor = 3,
 		MoveSpeed = 10,
+		Ability = {
+			Name = "Plague Cloud",
+			Type = "AoEDoT",
+			Cooldown = 15,
+			Value = 15, -- DPS to enemies in radius
+			Radius = 8,
+			Duration = 5,
+		},
 	},
 	FrostWyrm = {
 		Id = "FrostWyrm",
@@ -95,6 +151,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 70,
 		Armor = 2,
 		MoveSpeed = 14,
+		Ability = {
+			Name = "Frost Breath",
+			Type = "AoEBurst",
+			Cooldown = 12,
+			Value = 80, -- burst damage
+			Radius = 10,
+			Duration = 2, -- freeze (stun) duration
+		},
 	},
 	Infernal = {
 		Id = "Infernal",
@@ -106,6 +170,14 @@ local CreepData: { [string]: Types.CreepDef } = {
 		Damage = 55,
 		Armor = 6,
 		MoveSpeed = 12,
+		Ability = {
+			Name = "Immolation Aura",
+			Type = "Aura",
+			Cooldown = 0, -- always active, no cooldown
+			Value = 10, -- DPS to nearby enemies
+			Radius = 6,
+			Duration = 0, -- permanent
+		},
 	},
 }
 

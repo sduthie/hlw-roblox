@@ -39,54 +39,11 @@ local HEALTH_BAR_HEIGHT = 12
 --------------------------------------------------------------------------------
 
 function AbilityBarController:KnitInit()
-	self:_createUI()
+	-- Disabled: ability bar merged into SkillBarController
 end
 
 function AbilityBarController:KnitStart()
-	local GameService = Knit.GetService("GameService")
-	local HeroService = Knit.GetService("HeroService")
-	local HeroCombatService = Knit.GetService("HeroCombatService")
-	local AbilityService = Knit.GetService("AbilityService")
-
-	GameService.PhaseChanged:Connect(function(phase: string)
-		self:_onPhaseChanged(phase)
-	end)
-
-	HeroService.HeroSelected:Connect(function(userId: number, heroId: string)
-		local localPlayer = Players.LocalPlayer
-		if localPlayer and localPlayer.UserId == userId then
-			self._heroId = heroId
-			self:_updateSlots()
-		end
-	end)
-
-	HeroService.HeroLevelUp:Connect(function(newLevel: number)
-		self._heroLevel = newLevel
-		self:_updateSlots()
-	end)
-
-	HeroCombatService.ManaChanged:Connect(function(mana: number, maxMana: number)
-		self:_updateManaBar(mana, maxMana)
-	end)
-
-	HeroCombatService.HeroHealthChanged:Connect(function(health: number, maxHealth: number)
-		self:_updateHealthBar(health, maxHealth)
-	end)
-
-	AbilityService.AbilityCooldownStarted:Connect(function(slotIndex: number, cooldown: number)
-		self:_startCooldownAnimation(slotIndex, cooldown)
-	end)
-
-	-- Fetch initial phase
-	local currentPhase = GameService:GetPhase()
-	self:_onPhaseChanged(currentPhase)
-
-	-- Fetch initial hero
-	local heroId = HeroService:GetHeroId()
-	if heroId then
-		self._heroId = heroId
-		self:_updateSlots()
-	end
+	-- Disabled: ability bar merged into SkillBarController
 end
 
 --------------------------------------------------------------------------------

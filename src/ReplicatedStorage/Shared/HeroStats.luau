@@ -63,6 +63,9 @@ function HeroStats.compute(heroId: string, level: number, itemIds: { string }): 
 		if stats.CooldownReduction then
 			cooldownReduction += stats.CooldownReduction
 		end
+		if stats.Mana then
+			maxMana += stats.Mana
+		end
 	end
 
 	-- Cap CDR at 40%

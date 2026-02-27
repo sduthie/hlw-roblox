@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local GamePhases = require(ReplicatedStorage.Shared.GamePhases)
+local MapConfig = require(ReplicatedStorage.Shared.MapConfig)
 local RemoteValidator = require(ReplicatedStorage.Shared.RemoteValidator)
 
 local GameService = Knit.CreateService({
@@ -37,6 +38,13 @@ function GameService.Client:GetPhase(player: Player): string
 	return self.Server._phase
 end
 
+function GameService.Client:GetScoreboard(player: Player): { any }
+	if not RemoteValidator.rateLimit(player, "GetScoreboard", 0.5) then
+		return {}
+	end
+	return self.Server:GetScoreboard()
+end
+
 function GameService.Client:GetTeamLives(player: Player): { [number]: number }
 	if not RemoteValidator.rateLimit(player, "GetTeamLives", 0.1) then
 		return self.Server._teamLives
@@ -50,6 +58,40 @@ end
 
 function GameService:GetPhase(): string
 	return self._phase
+end
+
+function GameService:GetScoreboard(): { any }
+	local results = {}
+
+	local okTeam, teamService = pcall(function()
+		return Knit.GetService("TeamService")
+	end)
+	local okIncome, incomeService = pcall(function()
+		return Knit.GetService("IncomeService")
+	end)
+	local okHero, heroService = pcall(function()
+		return Knit.GetService("HeroService")
+	end)
+
+	for _, player in Players:GetPlayers() do
+		local teamId = if okTeam and teamService then teamService:GetTeam(player) else 0
+		local gold = if okIncome and incomeService then incomeService:GetGold(player) else 0
+		local income = if okIncome and incomeService then incomeService:GetIncome(player) else 0
+		local level = if okHero and heroService then heroService:GetLevel(player) else 1
+		local heroId = if okHero and heroService then heroService:GetHeroId(player) else nil
+
+		table.insert(results, {
+			UserId = player.UserId,
+			Name = player.DisplayName,
+			TeamId = teamId or 0,
+			Gold = math.floor(gold),
+			Income = math.floor(income),
+			Level = level,
+			HeroId = heroId or "",
+		})
+	end
+
+	return results
 end
 
 function GameService:GetTeamLives(): { [number]: number }
@@ -95,6 +137,14 @@ function GameService:DamageBase(targetTeamId: number, amount: number, creepTier:
 
 	-- Fire LivesUpdated to all clients
 	self.Client.LivesUpdated:FireAll(self._teamLives)
+
+	-- Update nexus health bar on map
+	local okMap, mapService = pcall(function()
+		return Knit.GetService("MapService")
+	end)
+	if okMap and mapService and mapService.UpdateNexusHealth then
+		mapService:UpdateNexusHealth(targetTeamId, self._teamLives[targetTeamId])
+	end
 
 	-- Fire BaseDamaged via BaseService
 	local ok, baseService = pcall(function()
@@ -187,6 +237,23 @@ function GameService:_startGame()
 	-- Notify all clients of fresh lives
 	self.Client.LivesUpdated:FireAll(self._teamLives)
 
+	-- Teleport heroes to their team's lane
+	local okTeam, teamService = pcall(function()
+		return Knit.GetService("TeamService")
+	end)
+	if okTeam and teamService then
+		for _, player in Players:GetPlayers() do
+			local teamId = teamService:GetTeam(player)
+			local spawnPos = if teamId then MapConfig.HERO_POSITIONS[teamId] else nil
+			if spawnPos and player.Character then
+				local rootPart = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+				if rootPart then
+					rootPart.CFrame = CFrame.new(spawnPos + Vector3.new(0, 3, 0))
+				end
+			end
+		end
+	end
+
 	-- Start hero combat
 	local okCombat, heroCombatService = pcall(function()
 		return Knit.GetService("HeroCombatService")
@@ -204,15 +271,26 @@ function GameService:_startGame()
 			abilityService:ApplyPassives(player)
 		end
 	end
-end
 
-function GameService:_resetGame()
-	-- 1. Clear all creeps
+	-- Start AI attacker that sends creeps against human players
 	local okCreep, creepService = pcall(function()
 		return Knit.GetService("CreepService")
 	end)
-	if okCreep and creepService and creepService.ClearAllCreeps then
-		creepService:ClearAllCreeps()
+	if okCreep and creepService then
+		creepService:StartAIAttacker()
+	end
+end
+
+function GameService:_resetGame()
+	-- 1. Clear all creeps and stop AI waves
+	local okCreep, creepService = pcall(function()
+		return Knit.GetService("CreepService")
+	end)
+	if okCreep and creepService then
+		creepService:StopAIAttacker()
+		if creepService.ClearAllCreeps then
+			creepService:ClearAllCreeps()
+		end
 	end
 
 	-- 2. Clean up all heroes
@@ -259,7 +337,23 @@ function GameService:_resetGame()
 		shopService:ResetAll()
 	end
 
-	-- 5. Reset internal state
+	-- 7. Reset upgrades
+	local okUpgrade, upgradeService = pcall(function()
+		return Knit.GetService("UpgradeService")
+	end)
+	if okUpgrade and upgradeService and upgradeService.ResetAll then
+		upgradeService:ResetAll()
+	end
+
+	-- 8. Reset death timers
+	local okDeath, deathTimerService = pcall(function()
+		return Knit.GetService("DeathTimerService")
+	end)
+	if okDeath and deathTimerService and deathTimerService.ResetAll then
+		deathTimerService:ResetAll()
+	end
+
+	-- 9. Reset internal state
 	self._teamLives[1] = Constants.BASE_MAX_LIVES
 	self._teamLives[2] = Constants.BASE_MAX_LIVES
 	self._streaks[1] = 0

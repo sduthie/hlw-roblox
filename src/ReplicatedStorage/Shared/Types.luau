@@ -49,6 +49,14 @@ export type HeroDef = {
 	BaseDamage: number,
 	BaseArmor: number,
 	MoveSpeed: number,
+	AttackRange: number?,
+	Attributes: {
+		Strength: number,
+		Agility: number,
+		Stamina: number,
+		Intelligence: number,
+	}?,
+	AbilityKeys: { string }?,
 	Abilities: { AbilityDef },
 	Appearance: HeroAppearanceDef?,
 }
@@ -91,6 +99,15 @@ export type HeroCombatState = {
 	Buffs: { BuffInstance },
 }
 
+export type CreepAbilityDef = {
+	Name: string,
+	Type: string, -- "Stun"|"BonusDamage"|"BuffAllies"|"Charge"|"Heal"|"Slow"|"AoEDoT"|"AoEBurst"|"Aura"
+	Cooldown: number,
+	Value: number, -- stun duration / heal amount / damage / slow factor / etc.
+	Radius: number, -- 0 for single-target abilities
+	Duration: number, -- for DoTs, buffs, slows (0 if instant)
+}
+
 export type CreepDef = {
 	Id: CreepId,
 	Name: string,
@@ -101,6 +118,7 @@ export type CreepDef = {
 	Damage: number,
 	Armor: number,
 	MoveSpeed: number,
+	Ability: CreepAbilityDef?,
 }
 
 export type ItemDef = {

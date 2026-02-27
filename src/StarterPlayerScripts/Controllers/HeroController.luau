@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContextActionService = game:GetService("ContextActionService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Constants = require(ReplicatedStorage.Shared.Constants)
@@ -90,10 +91,18 @@ function HeroController:_confirmHero(heroId: string)
 	local heroService = Knit.GetService("HeroService")
 	heroService:SelectHero(heroId)
 
-	-- Update UI to show confirmed state
+	-- Update UI to show confirmed state then hide
 	self:_highlightCard(heroId)
 	self:_showHint(false)
 	self:_showConfirmedIndicator(heroId)
+
+	-- Hide overlay after a brief moment so the player sees the "SELECTED" flash
+	task.delay(0.5, function()
+		local frame = self._heroSelectFrame
+		if frame then
+			frame.Visible = false
+		end
+	end)
 end
 
 function HeroController:SelectHero(heroId: string)
@@ -127,9 +136,50 @@ function HeroController:_onPhaseChanged(phase: string)
 		self:_resetHighlights()
 		self:_showHint(false)
 		frame.Visible = true
+		self:_bindReopenKey()
 	else
 		frame.Visible = false
+		self:_unbindReopenKey()
 	end
+end
+
+function HeroController:_reopenSelection()
+	local frame = self._heroSelectFrame
+	if not frame then
+		return
+	end
+
+	-- Toggle: if already visible, hide it
+	if frame.Visible then
+		frame.Visible = false
+		return
+	end
+
+	-- Allow re-choosing: clear confirmed state
+	self._confirmedHeroId = nil
+	self._lastClickHeroId = nil
+	self._lastClickTime = 0
+	self:_resetHighlights()
+
+	-- Re-highlight the current selection if any
+	if self._selectedHeroId then
+		self:_highlightCard(self._selectedHeroId)
+	end
+
+	self:_showHint(false)
+	frame.Visible = true
+end
+
+function HeroController:_bindReopenKey()
+	ContextActionService:BindAction("ReopenHeroSelect", function(_, state)
+		if state == Enum.UserInputState.Begin then
+			self:_reopenSelection()
+		end
+	end, false, Enum.KeyCode.H)
+end
+
+function HeroController:_unbindReopenKey()
+	ContextActionService:UnbindAction("ReopenHeroSelect")
 end
 
 function HeroController:_onHeroSelected(userId: number, heroId: string)
@@ -353,7 +403,7 @@ function HeroController:_showHint(visible: boolean)
 		hint.Position = UDim2.new(0, 0, 1, -50)
 		hint.AnchorPoint = Vector2.new(0, 0)
 		hint.BackgroundTransparency = 1
-		hint.Text = "Double-click to select"
+		hint.Text = "Double-click to select  |  Press H to reopen"
 		hint.Font = Enum.Font.GothamMedium
 		hint.TextSize = 16
 		hint.TextColor3 = Color3.fromRGB(200, 200, 200)

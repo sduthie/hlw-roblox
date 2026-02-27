@@ -76,12 +76,6 @@ function IncomeService:GetIncome(player: Player): number
 end
 
 function IncomeService:SpendGold(player: Player, amount: number): boolean
-	-- Only allow spending during the Playing phase
-	local GameService = Knit.GetService("GameService")
-	if GameService:GetPhase() ~= Constants.PHASE_PLAYING then
-		return false
-	end
-
 	local userId = player.UserId
 	local current = self._gold[userId] or 0
 	if current < amount then

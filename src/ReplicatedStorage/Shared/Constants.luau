@@ -11,41 +11,25 @@ Constants.BASE_MAX_LIVES = 100
 
 -- Income
 Constants.INCOME_INTERVAL = 17 -- seconds between income ticks
-Constants.STARTING_GOLD = 250
-Constants.STARTING_INCOME = 10
+Constants.STARTING_GOLD = 75
+Constants.STARTING_INCOME = 5
 Constants.INCOME_PER_CREEP_COST = 1 -- income gained per gold spent on creeps
 
 -- Hero
-Constants.HERO_MAX_LEVEL = 25
+Constants.HERO_MAX_LEVEL = 30
 Constants.HERO_XP_PER_LEVEL = {
-	100,
-	120,
-	150,
-	190,
-	240,
-	300,
-	370,
-	450,
-	540,
-	640,
-	750,
-	870,
-	1000,
-	1140,
-	1290,
-	1450,
-	1620,
-	1800,
-	1990,
-	2190,
-	2400,
-	2620,
-	2850,
-	3090,
-	3340,
+	100, 120, 150, 190, 240,
+	300, 370, 450, 540, 640,
+	750, 870, 1000, 1140, 1290,
+	1450, 1620, 1800, 1990, 2190,
+	2400, 2620, 2850, 3090, 3340,
+	3600, 3870, 4150, 4440, 4740,
 }
-Constants.HERO_ABILITY_UNLOCK_LEVELS = { 1, 3, 5, 10 } -- levels at which abilities unlock
 Constants.HERO_PICK_TIME = 30 -- seconds for hero selection
+Constants.ULTIMATE_REQUIRED_LEVEL = 6 -- hero level needed to learn ultimate
+Constants.ATTRIBUTE_BONUS_HP = 50
+Constants.ATTRIBUTE_BONUS_DAMAGE = 3
+Constants.ATTRIBUTE_BONUS_ARMOR = 1
 
 -- Creep Tiers (unlocked by town hall level)
 Constants.TOWN_HALL_TIERS = {
@@ -104,6 +88,7 @@ Constants.MAX_ITEMS_PER_PLAYER = 6
 Constants.HERO_ATTACK_RANGE = 12
 Constants.HERO_ATTACK_RATE = 1.0 -- seconds between auto-attacks
 Constants.HERO_COMBAT_UPDATE_RATE = 10 -- Hz, match creep loop
+Constants.DAMAGE_VARIANCE = 0.20 -- ±20% random damage spread
 
 -- Hero XP & Bounty
 Constants.HERO_XP_PER_CREEP_KILL = 30
@@ -118,5 +103,10 @@ Constants.ARMOR_PER_LEVEL = 0.5
 Constants.BASE_MANA = 100
 Constants.MANA_REGEN = 1 -- per second
 Constants.MANA_PER_LEVEL = 10
+
+-- Death Timer
+Constants.DEATH_TIMER_BASE = 5
+Constants.DEATH_TIMER_PER_DEATH = 3
+Constants.DEATH_TIMER_MAX = 45
 
 return Constants

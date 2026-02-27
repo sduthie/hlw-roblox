@@ -4,12 +4,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
-local ContextActionService = game:GetService("ContextActionService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Constants = require(ReplicatedStorage.Shared.Constants)
 local CreepData = require(ReplicatedStorage.Shared.CreepData)
+local CreepIcons = require(ReplicatedStorage.Shared.CreepIcons)
 local ItemData = require(ReplicatedStorage.Shared.ItemData)
+local MedicalData = require(ReplicatedStorage.Shared.MedicalData)
+local FamiliarData = require(ReplicatedStorage.Shared.FamiliarData)
 local UpgradeData = require(ReplicatedStorage.Shared.UpgradeData)
 local Util = require(ReplicatedStorage.Shared.Util)
 
@@ -33,6 +35,12 @@ ShopController._scrollingFrame = nil :: ScrollingFrame?
 ShopController._activeTab = "Creeps" :: string
 ShopController._tabButtons = {} :: { [string]: TextButton }
 ShopController._upgradeLevels = {} :: { [string]: number }
+ShopController._currentGold = 0 :: number
+ShopController._creepCosts = {} :: { [string]: number } -- creepId -> current escalated cost
+ShopController._medicalButtons = {} :: { [string]: TextButton }
+ShopController._familiarButtons = {} :: { [string]: TextButton }
+ShopController._statusLabel = nil :: TextLabel?
+ShopController._statusTween = nil :: Tween?
 
 --------------------------------------------------------------------------------
 -- Constants (local UI)
@@ -61,14 +69,22 @@ local COLOR_ECON = Color3.fromRGB(80, 160, 80)
 local COLOR_HERO = Color3.fromRGB(80, 120, 200)
 local COLOR_MINION = Color3.fromRGB(200, 120, 60)
 local FLASH_DURATION = 0.3
+local COLOR_BUTTON_DISABLED = Color3.fromRGB(30, 30, 30)
+local COLOR_TEXT_DISABLED = Color3.fromRGB(100, 100, 100)
+local COLOR_COST_CANT_AFFORD = Color3.fromRGB(200, 60, 60)
 
 local COLOR_ITEM = Color3.fromRGB(200, 180, 60)
-local TABS = { "Creeps", "Items", "Economy", "Hero", "Minion" }
+local COLOR_MEDICAL = Color3.fromRGB(80, 200, 120) -- green for medical
+local COLOR_FAMILIAR = Color3.fromRGB(180, 100, 220) -- purple for familiars
+local COLOR_PREMIUM = Color3.fromRGB(255, 180, 50) -- gold for premium items
+local TABS = { "Creeps", "Items", "Medical", "Familiar", "Upgrades" }
 
 local CATEGORY_COLORS = {
 	Economy = COLOR_ECON,
 	Hero = COLOR_HERO,
 	Minion = COLOR_MINION,
+	Medical = COLOR_MEDICAL,
+	Familiar = COLOR_FAMILIAR,
 }
 
 --------------------------------------------------------------------------------
@@ -80,49 +96,83 @@ function ShopController:KnitInit()
 end
 
 function ShopController:KnitStart()
-	local ShopService = Knit.GetService("ShopService")
+	-- Connect service signals with pcall protection so one failure doesn't break everything
+	local ok, err = pcall(function()
+		local ShopService = Knit.GetService("ShopService")
 
-	ShopService.ItemPurchased:Connect(function(itemId: string)
-		self:_onItemPurchased(itemId)
+		ShopService.ItemPurchased:Connect(function(itemId: string)
+			self:_onItemPurchased(itemId)
+		end)
+
+		ShopService.TownHallUpgraded:Connect(function(newTier: number)
+			self._currentTier = newTier
+			self:_updateTownHallButton()
+			if self._activeTab == "Creeps" then
+				self:_refreshContent()
+			end
+		end)
+
+		ShopService.MedicalPurchased:Connect(function(medicalId: string)
+			if self._activeTab == "Medical" then
+				self:_refreshContent()
+			end
+		end)
+
+		ShopService.FamiliarPurchased:Connect(function(familiarId: string)
+			if self._activeTab == "Familiar" then
+				self:_refreshContent()
+			end
+		end)
+
+		-- Fetch initial tier
+		local tier = ShopService:GetTownHallTier()
+		if tier then
+			self._currentTier = tier
+			self:_updateTownHallButton()
+		end
 	end)
+	if not ok then
+		warn("[ShopController] ShopService setup error:", err)
+	end
 
-	ShopService.TownHallUpgraded:Connect(function(newTier: number)
-		self._currentTier = newTier
-		self:_updateTownHallButton()
-		if self._activeTab == "Creeps" then
+	-- Upgrade service signals
+	local ok2, err2 = pcall(function()
+		local UpgradeService = Knit.GetService("UpgradeService")
+		UpgradeService.UpgradePurchased:Connect(function(upgradeId: string, newLevel: number)
+			self._upgradeLevels[upgradeId] = newLevel
 			self:_refreshContent()
+		end)
+
+		local levels = UpgradeService:GetAllUpgrades()
+		if levels then
+			self._upgradeLevels = levels
 		end
 	end)
+	if not ok2 then
+		warn("[ShopController] UpgradeService setup error:", err2)
+	end
 
-	-- Listen for upgrade purchases
-	local UpgradeService = Knit.GetService("UpgradeService")
-	UpgradeService.UpgradePurchased:Connect(function(upgradeId: string, newLevel: number)
-		self._upgradeLevels[upgradeId] = newLevel
-		self:_refreshContent()
+	-- Track gold for affordability display
+	local ok3, err3 = pcall(function()
+		local IncomeService = Knit.GetService("IncomeService")
+		IncomeService.GoldChanged:Connect(function(amount: number)
+			self._currentGold = amount
+			if self._shopOpen then
+				self:_updateAffordability()
+			end
+		end)
+
+		local initialGold = IncomeService:GetGold()
+		if initialGold then
+			self._currentGold = initialGold
+		end
 	end)
-
-	-- Fetch initial tier
-	local tier = ShopService:GetTownHallTier()
-	if tier then
-		self._currentTier = tier
-		self:_updateTownHallButton()
+	if not ok3 then
+		warn("[ShopController] IncomeService setup error:", err3)
 	end
 
-	-- Fetch initial upgrade levels
-	local levels = UpgradeService:GetAllUpgrades()
-	if levels then
-		self._upgradeLevels = levels
-	end
-
-	-- Connect to shop building ProximityPrompts
+	-- Connect to shop building signs and ProximityPrompts
 	self:_connectShopPrompts()
-
-	-- B key to toggle shop
-	ContextActionService:BindAction("ToggleShop", function(_, state)
-		if state == Enum.UserInputState.Begin then
-			self:ToggleShop()
-		end
-	end, false, Enum.KeyCode.B)
 end
 
 --------------------------------------------------------------------------------
@@ -131,14 +181,28 @@ end
 
 function ShopController:ToggleShop()
 	if not self._shopFrame then
+		warn("[ShopController] ToggleShop: _shopFrame is nil")
 		return
 	end
 
 	self._shopOpen = not self._shopOpen
 
 	if self._shopOpen then
-		self:_refreshContent()
-		self:_updateTownHallButton()
+		-- Wrap content refresh in pcall so panel still opens even if content fails
+		local ok, err = pcall(function()
+			self:_refreshContent()
+		end)
+		if not ok then
+			warn("[ShopController] _refreshContent error:", err)
+		end
+
+		local ok2, err2 = pcall(function()
+			self:_updateTownHallButton()
+		end)
+		if not ok2 then
+			warn("[ShopController] _updateTownHallButton error:", err2)
+		end
+
 		local tween = TweenService:Create(self._shopFrame, TWEEN_INFO_OPEN, {
 			Position = PANEL_ONSCREEN,
 		})
@@ -156,39 +220,140 @@ end
 --------------------------------------------------------------------------------
 
 function ShopController:_connectShopPrompts()
-	local function connectPrompt(shopPart: BasePart)
-		local prompt = shopPart:FindFirstChildOfClass("ProximityPrompt")
-		if not prompt then
-			return
-		end
+	local tabMap = {
+		Gear = "Items",
+		Medical = "Medical",
+		Familiar = "Familiar",
+		Upgrades = "Upgrades",
+		Creeps = "Creeps",
+	}
 
-		prompt.Triggered:Connect(function(_triggerPlayer: Player)
-			-- Only block if we know the player is on a different team
-			local shopTeamId = shopPart:GetAttribute("TeamId")
-			if shopTeamId then
-				local ok, TeamService = pcall(function()
-					return Knit.GetService("TeamService")
-				end)
-				if ok and TeamService then
-					local myTeam = TeamService:GetTeam()
-					if myTeam and myTeam ~= shopTeamId then
-						return
-					end
+	local function openShopTab(shopPart: BasePart)
+		-- Team check
+		local shopTeamId = shopPart:GetAttribute("TeamId")
+		if shopTeamId then
+			local ok, TeamService = pcall(function()
+				return Knit.GetService("TeamService")
+			end)
+			if ok and TeamService then
+				local myTeam = TeamService:GetTeam()
+				if myTeam and myTeam ~= shopTeamId then
+					return
 				end
 			end
+		end
 
+		-- Route to correct tab based on ShopType
+		local shopType = shopPart:GetAttribute("ShopType")
+		if shopType then
+			local targetTab = tabMap[shopType] or "Creeps"
+			if not self._shopOpen then
+				self:ToggleShop()
+			end
+			self:_switchTab(targetTab)
+		else
 			self:ToggleShop()
+		end
+	end
+
+	local function connectShop(shopPart: BasePart)
+		-- ProximityPrompt (close range interaction)
+		task.spawn(function()
+			local prompt = shopPart:FindFirstChildOfClass("ProximityPrompt")
+			if not prompt then
+				prompt = shopPart:WaitForChild("ProximityPrompt", 5) :: ProximityPrompt?
+			end
+			if prompt then
+				prompt.Triggered:Connect(function()
+					openShopTab(shopPart)
+				end)
+			end
+		end)
+
+		-- Make BillboardGui sign clickable from anywhere on the map
+		task.spawn(function()
+			local signGui = shopPart:FindFirstChild("ShopSign") :: BillboardGui?
+			if not signGui then
+				signGui = shopPart:WaitForChild("ShopSign", 5) :: BillboardGui?
+			end
+			if not signGui then
+				return
+			end
+
+			-- Ensure the BillboardGui is interactive
+			signGui.Active = true
+
+			-- Find the existing sign label and add a clickable button over it
+			local signLabel = signGui:FindFirstChildOfClass("TextLabel")
+			if signLabel then
+				local clickBtn = Instance.new("TextButton")
+				clickBtn.Name = "ShopClickBtn"
+				clickBtn.Size = UDim2.fromScale(1, 1)
+				clickBtn.BackgroundTransparency = 1
+				clickBtn.Text = ""
+				clickBtn.Parent = signGui
+
+				clickBtn.Activated:Connect(function()
+					openShopTab(shopPart)
+				end)
+
+				-- Hover highlight
+				clickBtn.MouseEnter:Connect(function()
+					if signLabel then
+						signLabel.BackgroundTransparency = 0
+					end
+				end)
+				clickBtn.MouseLeave:Connect(function()
+					if signLabel then
+						signLabel.BackgroundTransparency = 0.3
+					end
+				end)
+			end
 		end)
 	end
 
 	-- Connect existing shop parts
 	for _, shopPart in CollectionService:GetTagged("Shop") do
-		connectPrompt(shopPart)
+		connectShop(shopPart)
 	end
 
 	-- Connect any shop parts added later
 	CollectionService:GetInstanceAddedSignal("Shop"):Connect(function(shopPart)
-		connectPrompt(shopPart)
+		connectShop(shopPart)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Persistent HUD shop button (always visible, always works)
+--------------------------------------------------------------------------------
+
+function ShopController:_createShopButton()
+	local screenGui = self._screenGui
+	if not screenGui then
+		return
+	end
+
+	local btn = Instance.new("TextButton")
+	btn.Name = "ShopToggleBtn"
+	btn.Size = UDim2.new(0, 70, 0, 28)
+	btn.Position = UDim2.new(1, -80, 0, 44)
+	btn.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
+	btn.BackgroundTransparency = 0.2
+	btn.BorderSizePixel = 0
+	btn.Text = "SHOP [B]"
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 12
+	btn.TextColor3 = Color3.fromRGB(255, 215, 80)
+	btn.AutoButtonColor = true
+	btn.ZIndex = 10
+	btn.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = btn
+
+	btn.Activated:Connect(function()
+		self:ToggleShop()
 	end)
 end
 
@@ -254,12 +419,12 @@ function ShopController:_createShopUI()
 	for i, tabName in TABS do
 		local tabBtn = Instance.new("TextButton")
 		tabBtn.Name = "Tab_" .. tabName
-		tabBtn.Size = UDim2.new(0, 54, 1, 0)
+		tabBtn.Size = UDim2.new(0, 38, 1, 0)
 		tabBtn.BackgroundColor3 = if tabName == self._activeTab then COLOR_TAB_ACTIVE else COLOR_TAB_INACTIVE
 		tabBtn.BorderSizePixel = 0
 		tabBtn.Text = tabName
 		tabBtn.Font = Enum.Font.GothamBold
-		tabBtn.TextSize = 11
+		tabBtn.TextSize = 9
 		tabBtn.TextColor3 = COLOR_WHITE
 		tabBtn.LayoutOrder = i
 		tabBtn.AutoButtonColor = false
@@ -282,6 +447,22 @@ function ShopController:_createShopUI()
 	separator.BackgroundColor3 = COLOR_SEPARATOR
 	separator.BorderSizePixel = 0
 	separator.Parent = shopFrame
+
+	-- Status label (shows purchase feedback)
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Name = "StatusLabel"
+	statusLabel.Size = UDim2.new(1, -16, 0, 18)
+	statusLabel.Position = UDim2.new(0, 8, 1, -22)
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Text = ""
+	statusLabel.Font = Enum.Font.GothamBold
+	statusLabel.TextSize = 12
+	statusLabel.TextColor3 = COLOR_FLASH_GREEN
+	statusLabel.TextTransparency = 1
+	statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+	statusLabel.ZIndex = 10
+	statusLabel.Parent = shopFrame
+	self._statusLabel = statusLabel
 
 	-- TownHall upgrade button
 	local townHallButton = Instance.new("TextButton")
@@ -359,14 +540,23 @@ function ShopController:_refreshContent()
 	table.clear(self._creepButtons)
 	table.clear(self._itemButtons)
 	table.clear(self._upgradeButtons)
+	table.clear(self._medicalButtons)
+	table.clear(self._familiarButtons)
 
 	if self._activeTab == "Creeps" then
 		self:_populateCreeps(scrollFrame)
 	elseif self._activeTab == "Items" then
 		self:_populateItems(scrollFrame)
+	elseif self._activeTab == "Medical" then
+		self:_populateMedical(scrollFrame)
+	elseif self._activeTab == "Familiar" then
+		self:_populateFamiliar(scrollFrame)
 	else
 		self:_populateUpgrades(scrollFrame, self._activeTab)
 	end
+
+	-- Grey out buttons the player can't afford
+	self:_updateAffordability()
 end
 
 --------------------------------------------------------------------------------
@@ -376,6 +566,9 @@ end
 function ShopController:_populateCreeps(parent: ScrollingFrame)
 	local ShopService = Knit.GetService("ShopService")
 	local availableIds = ShopService:GetAvailableCreeps()
+
+	-- Fetch escalated costs
+	self._creepCosts = ShopService:GetAllCreepCosts()
 
 	local creepList: { { id: string, def: any } } = {}
 	for _, creepId in availableIds do
@@ -422,9 +615,17 @@ function ShopController:_createCreepButton(creepId: string, def: any, layoutOrde
 	btnPadding.PaddingBottom = UDim.new(0, 6)
 	btnPadding.Parent = button
 
+	-- Creep icon (left side)
+	local ICON_SIZE = 36
+	local ICON_OFFSET = ICON_SIZE + 6 -- space for icon + gap
+	local icon = CreepIcons.build(creepId, ICON_SIZE)
+	icon.Position = UDim2.fromOffset(0, math.round((44 - ICON_SIZE) / 2))
+	icon.Parent = button
+
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "CreepName"
-	nameLabel.Size = UDim2.new(0.6, 0, 0, 18)
+	nameLabel.Size = UDim2.new(0.6, -ICON_OFFSET, 0, 18)
+	nameLabel.Position = UDim2.fromOffset(ICON_OFFSET, 0)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Text = def.Name
 	nameLabel.Font = Enum.Font.GothamBold
@@ -444,11 +645,15 @@ function ShopController:_createCreepButton(creepId: string, def: any, layoutOrde
 	tierLabel.TextXAlignment = Enum.TextXAlignment.Right
 	tierLabel.Parent = button
 
+	-- Show escalated cost if available, otherwise base cost
+	local displayCost = self._creepCosts[creepId] or def.Cost
+
 	local costLabel = Instance.new("TextLabel")
-	costLabel.Size = UDim2.new(0.5, 0, 0, 16)
-	costLabel.Position = UDim2.new(0, 0, 0, 22)
+	costLabel.Name = "CostLabel"
+	costLabel.Size = UDim2.new(0.5, -ICON_OFFSET, 0, 16)
+	costLabel.Position = UDim2.fromOffset(ICON_OFFSET, 22)
 	costLabel.BackgroundTransparency = 1
-	costLabel.Text = Util.formatGold(def.Cost) .. "g"
+	costLabel.Text = Util.formatGold(displayCost) .. "g"
 	costLabel.Font = Enum.Font.GothamMedium
 	costLabel.TextSize = 13
 	costLabel.TextColor3 = COLOR_GOLD_TEXT
@@ -616,6 +821,7 @@ function ShopController:_createItemButton(itemId: string, def: any, layoutOrder:
 end
 
 function ShopController:_onItemClicked(itemId: string)
+	local def = ItemData[itemId]
 	local ShopService = Knit.GetService("ShopService")
 	local success = ShopService:BuyItem(itemId)
 
@@ -626,8 +832,315 @@ function ShopController:_onItemClicked(itemId: string)
 
 	if success then
 		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_BUTTON_BG)
+		local name = if def then def.Name else itemId
+		self:_showStatus("Bought " .. name .. "!", COLOR_FLASH_GREEN)
 	else
 		self:_flashButton(button, COLOR_FLASH_RED, COLOR_BUTTON_BG)
+		local gold = self._currentGold
+		local cost = if def then def.Cost else 0
+		if gold < cost then
+			self:_showStatus("Not enough gold! (" .. tostring(math.floor(gold)) .. "/" .. tostring(cost) .. "g)", COLOR_FLASH_RED)
+		else
+			self:_showStatus("Cannot buy right now", COLOR_FLASH_RED)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Medical Tab
+--------------------------------------------------------------------------------
+
+function ShopController:_populateMedical(parent: ScrollingFrame)
+	local medList: { { id: string, def: any } } = {}
+	for id, def in MedicalData do
+		table.insert(medList, { id = id, def = def })
+	end
+	table.sort(medList, function(a, b)
+		return a.def.Cost < b.def.Cost
+	end)
+
+	local header = Instance.new("TextLabel")
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, 24)
+	header.BackgroundTransparency = 1
+	header.Text = "MEDICAL SUPPLIES"
+	header.Font = Enum.Font.GothamBold
+	header.TextSize = 14
+	header.TextColor3 = COLOR_MEDICAL
+	header.TextXAlignment = Enum.TextXAlignment.Left
+	header.LayoutOrder = 0
+	header.Parent = parent
+
+	for i, entry in medList do
+		local btn = self:_createMedicalButton(entry.id, entry.def, i)
+		btn.Parent = parent
+		self._medicalButtons[entry.id] = btn
+	end
+end
+
+function ShopController:_createMedicalButton(medicalId: string, def: any, layoutOrder: number): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = "Med_" .. medicalId
+	button.Size = UDim2.new(1, 0, 0, 56)
+	button.BackgroundColor3 = COLOR_BUTTON_BG
+	button.BorderSizePixel = 0
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.LayoutOrder = layoutOrder
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = button
+
+	local btnPadding = Instance.new("UIPadding")
+	btnPadding.PaddingLeft = UDim.new(0, 8)
+	btnPadding.PaddingRight = UDim.new(0, 8)
+	btnPadding.PaddingTop = UDim.new(0, 6)
+	btnPadding.PaddingBottom = UDim.new(0, 6)
+	btnPadding.Parent = button
+
+	-- Accent bar
+	local accentBar = Instance.new("Frame")
+	accentBar.Name = "Accent"
+	accentBar.Size = UDim2.new(0, 3, 1, -4)
+	accentBar.Position = UDim2.new(0, -6, 0, 2)
+	accentBar.BackgroundColor3 = COLOR_MEDICAL
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = button
+	local ac = Instance.new("UICorner")
+	ac.CornerRadius = UDim.new(0, 2)
+	ac.Parent = accentBar
+
+	-- Name
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(0.6, 0, 0, 18)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = def.Name
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 14
+	nameLabel.TextColor3 = COLOR_WHITE
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Parent = button
+
+	-- Cost
+	local costLabel = Instance.new("TextLabel")
+	costLabel.Name = "CostLabel"
+	costLabel.Size = UDim2.new(0.4, 0, 0, 18)
+	costLabel.Position = UDim2.new(0.6, 0, 0, 0)
+	costLabel.BackgroundTransparency = 1
+	costLabel.Text = Util.formatGold(def.Cost) .. "g"
+	costLabel.Font = Enum.Font.GothamBold
+	costLabel.TextSize = 13
+	costLabel.TextColor3 = COLOR_GOLD_TEXT
+	costLabel.TextXAlignment = Enum.TextXAlignment.Right
+	costLabel.Parent = button
+
+	-- Description
+	local descLabel = Instance.new("TextLabel")
+	descLabel.Size = UDim2.new(1, 0, 0, 14)
+	descLabel.Position = UDim2.new(0, 0, 0, 22)
+	descLabel.BackgroundTransparency = 1
+	descLabel.Text = def.Description
+	descLabel.Font = Enum.Font.Gotham
+	descLabel.TextSize = 11
+	descLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+	descLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descLabel.Parent = button
+
+	button.MouseEnter:Connect(function() button.BackgroundColor3 = COLOR_BUTTON_HOVER end)
+	button.MouseLeave:Connect(function() button.BackgroundColor3 = COLOR_BUTTON_BG end)
+	button.Activated:Connect(function()
+		self:_onMedicalClicked(medicalId)
+	end)
+
+	return button
+end
+
+function ShopController:_onMedicalClicked(medicalId: string)
+	local def = MedicalData[medicalId]
+	local ShopService = Knit.GetService("ShopService")
+	local success = ShopService:BuyMedical(medicalId)
+	local button = self._medicalButtons[medicalId]
+	if not button then return end
+	if success then
+		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_BUTTON_BG)
+		local name = if def then def.Name else medicalId
+		self:_showStatus("Used " .. name .. "!", COLOR_MEDICAL)
+	else
+		self:_flashButton(button, COLOR_FLASH_RED, COLOR_BUTTON_BG)
+		local gold = self._currentGold
+		local cost = if def then def.Cost else 0
+		if gold < cost then
+			self:_showStatus("Not enough gold! (" .. tostring(math.floor(gold)) .. "/" .. tostring(cost) .. "g)", COLOR_FLASH_RED)
+		else
+			self:_showStatus("Cannot buy right now", COLOR_FLASH_RED)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Familiar Tab
+--------------------------------------------------------------------------------
+
+function ShopController:_populateFamiliar(parent: ScrollingFrame)
+	local famList: { { id: string, def: any } } = {}
+	for id, def in FamiliarData do
+		table.insert(famList, { id = id, def = def })
+	end
+	-- Sort: gold items first, then premium
+	table.sort(famList, function(a, b)
+		if a.def.IsPremium ~= b.def.IsPremium then
+			return not a.def.IsPremium
+		end
+		return (a.def.Cost or a.def.RobuxCost or 0) < (b.def.Cost or b.def.RobuxCost or 0)
+	end)
+
+	local header = Instance.new("TextLabel")
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, 24)
+	header.BackgroundTransparency = 1
+	header.Text = "FAMILIARS"
+	header.Font = Enum.Font.GothamBold
+	header.TextSize = 14
+	header.TextColor3 = COLOR_FAMILIAR
+	header.TextXAlignment = Enum.TextXAlignment.Left
+	header.LayoutOrder = 0
+	header.Parent = parent
+
+	for i, entry in famList do
+		local btn = self:_createFamiliarButton(entry.id, entry.def, i)
+		btn.Parent = parent
+		self._familiarButtons[entry.id] = btn
+	end
+end
+
+function ShopController:_createFamiliarButton(familiarId: string, def: any, layoutOrder: number): TextButton
+	local isPremium = def.IsPremium == true
+	local button = Instance.new("TextButton")
+	button.Name = "Fam_" .. familiarId
+	button.Size = UDim2.new(1, 0, 0, 68)
+	button.BackgroundColor3 = COLOR_BUTTON_BG
+	button.BorderSizePixel = 0
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.LayoutOrder = layoutOrder
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = button
+
+	local btnPadding = Instance.new("UIPadding")
+	btnPadding.PaddingLeft = UDim.new(0, 8)
+	btnPadding.PaddingRight = UDim.new(0, 8)
+	btnPadding.PaddingTop = UDim.new(0, 6)
+	btnPadding.PaddingBottom = UDim.new(0, 6)
+	btnPadding.Parent = button
+
+	local accentColor = if isPremium then COLOR_PREMIUM else COLOR_FAMILIAR
+	local accentBar = Instance.new("Frame")
+	accentBar.Name = "Accent"
+	accentBar.Size = UDim2.new(0, 3, 1, -4)
+	accentBar.Position = UDim2.new(0, -6, 0, 2)
+	accentBar.BackgroundColor3 = accentColor
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = button
+	local ac = Instance.new("UICorner")
+	ac.CornerRadius = UDim.new(0, 2)
+	ac.Parent = accentBar
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(0.6, 0, 0, 18)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = def.Name
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 14
+	nameLabel.TextColor3 = if isPremium then COLOR_PREMIUM else COLOR_WHITE
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Parent = button
+
+	local costLabel = Instance.new("TextLabel")
+	costLabel.Name = "CostLabel"
+	costLabel.Size = UDim2.new(0.4, 0, 0, 18)
+	costLabel.Position = UDim2.new(0.6, 0, 0, 0)
+	costLabel.BackgroundTransparency = 1
+	costLabel.Font = Enum.Font.GothamBold
+	costLabel.TextSize = 13
+	costLabel.TextXAlignment = Enum.TextXAlignment.Right
+	costLabel.Parent = button
+
+	if isPremium then
+		costLabel.Text = "R$ " .. tostring(def.RobuxCost or 0)
+		costLabel.TextColor3 = COLOR_PREMIUM
+	else
+		costLabel.Text = Util.formatGold(def.Cost) .. "g"
+		costLabel.TextColor3 = COLOR_GOLD_TEXT
+	end
+
+	local descLabel = Instance.new("TextLabel")
+	descLabel.Size = UDim2.new(1, 0, 0, 14)
+	descLabel.Position = UDim2.new(0, 0, 0, 20)
+	descLabel.BackgroundTransparency = 1
+	descLabel.Text = def.Description
+	descLabel.Font = Enum.Font.Gotham
+	descLabel.TextSize = 11
+	descLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+	descLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descLabel.Parent = button
+
+	-- Stats line
+	local statParts: { string } = {}
+	if def.Stats then
+		for statName, statValue in def.Stats do
+			table.insert(statParts, "+" .. tostring(statValue) .. " " .. statName)
+		end
+	end
+	if def.IsConsumable then
+		table.insert(statParts, "Consumable")
+	end
+
+	local statsLabel = Instance.new("TextLabel")
+	statsLabel.Size = UDim2.new(1, 0, 0, 14)
+	statsLabel.Position = UDim2.new(0, 0, 0, 38)
+	statsLabel.BackgroundTransparency = 1
+	statsLabel.Text = table.concat(statParts, "  ")
+	statsLabel.Font = Enum.Font.GothamMedium
+	statsLabel.TextSize = 11
+	statsLabel.TextColor3 = if isPremium then Color3.fromRGB(255, 200, 120) else Color3.fromRGB(180, 140, 255)
+	statsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	statsLabel.Parent = button
+
+	button.MouseEnter:Connect(function() button.BackgroundColor3 = COLOR_BUTTON_HOVER end)
+	button.MouseLeave:Connect(function() button.BackgroundColor3 = COLOR_BUTTON_BG end)
+	button.Activated:Connect(function()
+		self:_onFamiliarClicked(familiarId)
+	end)
+
+	return button
+end
+
+function ShopController:_onFamiliarClicked(familiarId: string)
+	local def = FamiliarData[familiarId]
+	local ShopService = Knit.GetService("ShopService")
+	local success = ShopService:BuyFamiliar(familiarId)
+	local button = self._familiarButtons[familiarId]
+	if not button then return end
+	if success then
+		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_BUTTON_BG)
+		local name = if def then def.Name else familiarId
+		self:_showStatus("Summoned " .. name .. "!", COLOR_FAMILIAR)
+	else
+		self:_flashButton(button, COLOR_FLASH_RED, COLOR_BUTTON_BG)
+		if def and def.IsPremium then
+			self:_showStatus("Premium not yet available", COLOR_FLASH_RED)
+		else
+			local gold = self._currentGold
+			local cost = if def then def.Cost else 0
+			if gold < cost then
+				self:_showStatus("Not enough gold! (" .. tostring(math.floor(gold)) .. "/" .. tostring(cost) .. "g)", COLOR_FLASH_RED)
+			else
+				self:_showStatus("Cannot buy right now", COLOR_FLASH_RED)
+			end
+		end
 	end
 end
 
@@ -636,37 +1149,50 @@ end
 --------------------------------------------------------------------------------
 
 function ShopController:_populateUpgrades(parent: ScrollingFrame, category: string)
-	-- Collect upgrades for this category
-	local upgrades: { { id: string, def: any } } = {}
-	for id, def in UpgradeData do
-		if def.Category == category then
-			table.insert(upgrades, { id = id, def = def })
-		end
+	-- "Upgrades" tab shows all three categories together
+	local categories: { string }
+	if category == "Upgrades" then
+		categories = { "Economy", "Hero", "Minion" }
+	else
+		categories = { category }
 	end
 
-	-- Sort by first cost (cheapest first)
-	table.sort(upgrades, function(a, b)
-		return (a.def.Costs[1] or 0) < (b.def.Costs[1] or 0)
-	end)
+	local layoutOrder = 0
+	for _, cat in categories do
+		-- Collect upgrades for this category
+		local upgrades: { { id: string, def: any } } = {}
+		for id, def in UpgradeData do
+			if def.Category == cat then
+				table.insert(upgrades, { id = id, def = def })
+			end
+		end
 
-	-- Section header
-	local catColor = CATEGORY_COLORS[category] or COLOR_WHITE
-	local header = Instance.new("TextLabel")
-	header.Name = "Header"
-	header.Size = UDim2.new(1, 0, 0, 24)
-	header.BackgroundTransparency = 1
-	header.Text = string.upper(category) .. " UPGRADES"
-	header.Font = Enum.Font.GothamBold
-	header.TextSize = 14
-	header.TextColor3 = catColor
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	header.LayoutOrder = 0
-	header.Parent = parent
+		-- Sort by first cost (cheapest first)
+		table.sort(upgrades, function(a, b)
+			return (a.def.Costs[1] or 0) < (b.def.Costs[1] or 0)
+		end)
 
-	for i, entry in upgrades do
-		local btn = self:_createUpgradeButton(entry.id, entry.def, i, catColor)
-		btn.Parent = parent
-		self._upgradeButtons[entry.id] = btn
+		-- Section header
+		local catColor = CATEGORY_COLORS[cat] or COLOR_WHITE
+		local header = Instance.new("TextLabel")
+		header.Name = "Header_" .. cat
+		header.Size = UDim2.new(1, 0, 0, 24)
+		header.BackgroundTransparency = 1
+		header.Text = string.upper(cat) .. " UPGRADES"
+		header.Font = Enum.Font.GothamBold
+		header.TextSize = 14
+		header.TextColor3 = catColor
+		header.TextXAlignment = Enum.TextXAlignment.Left
+		header.LayoutOrder = layoutOrder
+		header.Parent = parent
+		layoutOrder += 1
+
+		for _, entry in upgrades do
+			local btn = self:_createUpgradeButton(entry.id, entry.def, layoutOrder, catColor)
+			btn.Parent = parent
+			self._upgradeButtons[entry.id] = btn
+			layoutOrder += 1
+		end
 	end
 end
 
@@ -782,10 +1308,86 @@ function ShopController:_createUpgradeButton(upgradeId: string, def: any, layout
 end
 
 --------------------------------------------------------------------------------
+-- Affordability: grey out buttons the player can't afford
+--------------------------------------------------------------------------------
+
+function ShopController:_updateAffordability()
+	local gold = self._currentGold
+
+	-- Creep buttons
+	for creepId, button in self._creepButtons do
+		local cost = self._creepCosts[creepId]
+		if not cost then
+			local def = CreepData[creepId]
+			cost = if def then def.Cost else 0
+		end
+		local canAfford = gold >= cost
+		self:_setButtonAffordable(button, canAfford)
+		-- Update cost label color
+		local costLabel = button:FindFirstChild("CostLabel") :: TextLabel?
+		if costLabel then
+			costLabel.TextColor3 = if canAfford then COLOR_GOLD_TEXT else COLOR_COST_CANT_AFFORD
+		end
+	end
+
+	-- Item buttons
+	for itemId, button in self._itemButtons do
+		local def = ItemData[itemId]
+		if def then
+			local canAfford = gold >= def.Cost
+			self:_setButtonAffordable(button, canAfford)
+		end
+	end
+
+	-- Upgrade buttons
+	for upgradeId, button in self._upgradeButtons do
+		local def = UpgradeData[upgradeId]
+		if def then
+			local currentLevel = self._upgradeLevels[upgradeId] or 0
+			local maxed = currentLevel >= def.MaxLevel
+			if not maxed then
+				local nextCost = def.Costs[currentLevel + 1] or 0
+				local canAfford = gold >= nextCost
+				self:_setButtonAffordable(button, canAfford)
+			end
+		end
+	end
+
+	-- Medical buttons
+	for medicalId, button in self._medicalButtons do
+		local def = MedicalData[medicalId]
+		if def then
+			local canAfford = gold >= def.Cost
+			self:_setButtonAffordable(button, canAfford)
+		end
+	end
+
+	-- Familiar buttons (gold ones only)
+	for familiarId, button in self._familiarButtons do
+		local def = FamiliarData[familiarId]
+		if def and not def.IsPremium then
+			local canAfford = gold >= def.Cost
+			self:_setButtonAffordable(button, canAfford)
+		end
+	end
+end
+
+function ShopController:_setButtonAffordable(button: TextButton, canAfford: boolean)
+	if canAfford then
+		button.BackgroundColor3 = COLOR_BUTTON_BG
+		button.BackgroundTransparency = 0
+	else
+		button.BackgroundColor3 = COLOR_BUTTON_DISABLED
+		button.BackgroundTransparency = 0.3
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Purchase Actions
 --------------------------------------------------------------------------------
 
 function ShopController:_onCreepClicked(creepId: string)
+	local def = CreepData[creepId]
 	local ShopService = Knit.GetService("ShopService")
 	local success = ShopService:BuyCreep(creepId)
 
@@ -796,12 +1398,34 @@ function ShopController:_onCreepClicked(creepId: string)
 
 	if success then
 		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_BUTTON_BG)
+		local name = if def then def.Name else creepId
+		self:_showStatus("Sent " .. name .. "!", COLOR_FLASH_GREEN)
+
+		-- Refresh escalated costs after purchase and update the button label
+		self._creepCosts = ShopService:GetAllCreepCosts()
+		local newCost = self._creepCosts[creepId]
+		if newCost then
+			local costLabel = button:FindFirstChild("CostLabel") :: TextLabel?
+			if costLabel then
+				costLabel.Text = Util.formatGold(newCost) .. "g"
+			end
+		end
+		self:_updateAffordability()
 	else
 		self:_flashButton(button, COLOR_FLASH_RED, COLOR_BUTTON_BG)
+		-- Show reason for failure
+		local gold = self._currentGold
+		local cost = self._creepCosts[creepId] or (if def then def.Cost else 0)
+		if gold < cost then
+			self:_showStatus("Not enough gold! (" .. tostring(math.floor(gold)) .. "/" .. tostring(cost) .. "g)", COLOR_FLASH_RED)
+		else
+			self:_showStatus("Cannot buy right now", COLOR_FLASH_RED)
+		end
 	end
 end
 
 function ShopController:_onUpgradeClicked(upgradeId: string)
+	local def = UpgradeData[upgradeId]
 	local UpgradeService = Knit.GetService("UpgradeService")
 	local success = UpgradeService:PurchaseUpgrade(upgradeId)
 
@@ -812,9 +1436,21 @@ function ShopController:_onUpgradeClicked(upgradeId: string)
 
 	if success then
 		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_BUTTON_BG)
-		-- UI refresh happens via UpgradePurchased signal
+		local name = if def then def.Name else upgradeId
+		self:_showStatus("Upgraded " .. name .. "!", COLOR_FLASH_GREEN)
 	else
 		self:_flashButton(button, COLOR_FLASH_RED, COLOR_BUTTON_BG)
+		if def then
+			local currentLevel = self._upgradeLevels[upgradeId] or 0
+			local nextCost = def.Costs[currentLevel + 1] or 0
+			if self._currentGold < nextCost then
+				self:_showStatus("Not enough gold! (" .. tostring(math.floor(self._currentGold)) .. "/" .. tostring(nextCost) .. "g)", COLOR_FLASH_RED)
+			else
+				self:_showStatus("Cannot upgrade right now", COLOR_FLASH_RED)
+			end
+		else
+			self:_showStatus("Cannot upgrade right now", COLOR_FLASH_RED)
+		end
 	end
 end
 
@@ -874,8 +1510,10 @@ function ShopController:_onTownHallClicked()
 
 	if success then
 		self:_flashButton(button, COLOR_FLASH_GREEN, COLOR_TOWNHALL)
+		self:_showStatus("Town Hall upgraded!", COLOR_FLASH_GREEN)
 	else
 		self:_flashButton(button, COLOR_FLASH_RED, COLOR_TOWNHALL)
+		self:_showStatus("Cannot upgrade right now", COLOR_FLASH_RED)
 	end
 end
 
@@ -896,6 +1534,34 @@ function ShopController:_flashButton(button: GuiButton, flashColor: Color3, rest
 		BackgroundColor3 = restoreColor,
 	})
 	tween:Play()
+end
+
+function ShopController:_showStatus(message: string, color: Color3)
+	local label = self._statusLabel
+	if not label then
+		return
+	end
+
+	-- Cancel previous fade
+	if self._statusTween then
+		self._statusTween:Cancel()
+		self._statusTween = nil
+	end
+
+	label.Text = message
+	label.TextColor3 = color
+	label.TextTransparency = 0
+
+	-- Fade out after 1.5 seconds
+	local tween = TweenService:Create(
+		label,
+		TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ TextTransparency = 1 }
+	)
+	self._statusTween = tween
+	task.delay(1.0, function()
+		tween:Play()
+	end)
 end
 
 return ShopController

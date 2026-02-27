@@ -2,6 +2,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Constants = require(ReplicatedStorage.Shared.Constants)
@@ -18,6 +19,7 @@ type CreepInstance = {
 	OwnerId: number,
 	TeamId: number,
 	TargetTeamId: number,
+	LaneKey: string,
 	LaneIndex: number,
 	WaypointIndex: number,
 	Position: Vector3,
@@ -30,6 +32,22 @@ type CreepInstance = {
 	DamageMultiplier: number?,
 	SpeedMultiplier: number?,
 	LastHitByPlayer: Player?,
+	-- Ability system fields
+	LastAbilityTime: number?,
+	AuraActive: boolean?,
+	StunnedUntil: number?,
+	SlowedUntil: number?,
+	SlowFactor: number?,
+	BuffExpires: number?,
+	BuffDamageMultiplier: number?,
+	-- AoE DoT tracking (Plague Cloud)
+	DoTActive: boolean?,
+	DoTExpires: number?,
+	DoTDPS: number?,
+	DoTRadius: number?,
+	-- Charge tracking (Knight)
+	ChargeReady: boolean?,
+	ChargeDamageMultiplier: number?,
 }
 
 --------------------------------------------------------------------------------
@@ -44,6 +62,7 @@ local CreepService = Knit.CreateService({
 		CreepDied = Knit.CreateSignal(),
 		CreepReachedBase = Knit.CreateSignal(),
 		CreepKillReward = Knit.CreateSignal(),
+		CreepAbilityUsed = Knit.CreateSignal(),
 	},
 })
 
@@ -56,6 +75,7 @@ CreepService._activeCreeps = {} :: { [number]: CreepInstance }
 CreepService._creepFolder = nil :: Folder?
 CreepService._aiActive = false :: boolean
 CreepService._aiStartTime = 0 :: number
+CreepService._lastGateFireTime = {} :: { [number]: number } -- teamId -> last fire time
 
 --------------------------------------------------------------------------------
 -- Constants (local shortcuts)
@@ -71,12 +91,21 @@ local KILL_BOUNTY_PERCENT = Constants.KILL_BOUNTY_PERCENT
 local BLACK_CITADEL_CREEP_HP_BONUS = Constants.BLACK_CITADEL_CREEP_HP_BONUS
 
 -- Creep-vs-creep combat
-local CREEP_AGGRO_RANGE = 8
+local CREEP_AGGRO_RANGE = 20
 local CREEP_ATTACK_COOLDOWN = 1
+
+-- Creep-vs-hero combat
+local CREEP_HERO_AGGRO_RANGE = 25
+local CREEP_HERO_ATTACK_COOLDOWN = 1.2
+local CREEP_HERO_DAMAGE_MULT = 0.5 -- creeps deal 50% of their damage to heroes
+local CREEP_MELEE_STANDOFF = 5 -- min distance from hero (don't stack on top)
 
 -- Separation: creeps push apart when closer than this
 local CREEP_SEPARATION_DISTANCE = 4
 local CREEP_SEPARATION_STRENGTH = 6 -- studs/sec push speed
+
+-- Gate tower visual fire rate
+local GATE_FIRE_INTERVAL = 1.2 -- seconds between visible tower shots
 
 --------------------------------------------------------------------------------
 -- Client method
@@ -125,16 +154,26 @@ function CreepService:SendCreep(player: Player, creepId: string): boolean
 		return false
 	end
 
-	-- 5. Deduct gold
+	-- 5. Deduct gold (use escalated cost from ShopService)
+	local escalatedCost = ShopService:GetCreepCost(player, creepId)
 	local IncomeService = Knit.GetService("IncomeService")
-	if not IncomeService:SpendGold(player, creepDef.Cost) then
+	if not IncomeService:SpendGold(player, escalatedCost) then
 		return false
 	end
 
-	-- 6. Add income bonus
+	-- 6. Track purchase count for cost escalation
+	local userId = player.UserId
+	local counts = ShopService._creepPurchaseCounts[userId]
+	if not counts then
+		counts = {}
+		ShopService._creepPurchaseCounts[userId] = counts
+	end
+	counts[creepId] = (counts[creepId] or 0) + 1
+
+	-- 7. Add income bonus
 	IncomeService:AddIncome(player, creepDef.IncomeBonus)
 
-	-- 7. Spawn the wave
+	-- 8. Spawn the wave
 	self:_spawnWave(player, creepId, teamId)
 	return true
 end
@@ -145,7 +184,7 @@ end
 
 function CreepService:_spawnWave(player: Player, creepId: string, teamId: number)
 	local targetTeamId = if teamId == 1 then 2 else 1
-	local laneKey = if targetTeamId == 2 then "ToTeam2" else "ToTeam1"
+	local laneKey = "AttackTeam" .. tostring(targetTeamId)
 
 	-- Determine HP bonus from Black Citadel (TownHall tier >= 3)
 	local ShopService = Knit.GetService("ShopService")
@@ -172,13 +211,10 @@ function CreepService:_spawnWave(player: Player, creepId: string, teamId: number
 		speedMultiplier = 1 + (speedPct / 100)
 	end
 
-	for i = 1, WAVE_SIZE do
-		task.delay((i - 1) * CREEP_SPAWN_INTERVAL, function()
-			local creep = self:_createCreep(creepId, player.UserId, teamId, targetTeamId, laneKey, hpMultiplier)
-			creep.DamageMultiplier = dmgMultiplier
-			creep.SpeedMultiplier = speedMultiplier
-		end)
-	end
+	-- Send a single creep per purchase
+	local creep = self:_createCreep(creepId, player.UserId, teamId, targetTeamId, laneKey, hpMultiplier)
+	creep.DamageMultiplier = dmgMultiplier
+	creep.SpeedMultiplier = speedMultiplier
 end
 
 --------------------------------------------------------------------------------
@@ -191,16 +227,18 @@ function CreepService:_createCreep(
 	teamId: number,
 	targetTeamId: number,
 	laneKey: string,
-	hpMultiplier: number
+	hpMultiplier: number,
+	spawnOverride: Vector3?
 ): CreepInstance
 	local creepDef = CreepData[creepId]
 	local id = self._nextCreepId
 	self._nextCreepId += 1
 
 	local baseHealth = math.floor(creepDef.Health * hpMultiplier)
-	local baseSpawn = MapConfig.SPAWN_POSITIONS[teamId]
-	-- Randomize X within ±12 studs so creeps spread across the lane width
-	local xOffset = (math.random() * 24) - 12
+	-- Use override if provided, otherwise attack spawn at top of target's lane
+	local baseSpawn = spawnOverride or MapConfig.ATTACK_SPAWN_POSITIONS[targetTeamId]
+	-- Randomize X within ±35 studs so creeps spread across the wide lane
+	local xOffset = (math.random() * 70) - 35
 	local spawnPosition = Vector3.new(baseSpawn.X + xOffset, baseSpawn.Y, baseSpawn.Z)
 
 	-- Build the model using CreepModels module --------------------------------
@@ -251,23 +289,36 @@ function CreepService:_createCreep(
 	model.Parent = self._creepFolder
 
 	-- Build instance data -----------------------------------------------------
+	local isAura = creepDef.Ability and creepDef.Ability.Type == "Aura"
+
 	local creep: CreepInstance = {
 		Id = id,
 		CreepId = creepId,
 		OwnerId = ownerId,
 		TeamId = teamId,
 		TargetTeamId = targetTeamId,
+		LaneKey = laneKey,
 		LaneIndex = 1,
 		WaypointIndex = 1,
 		Position = spawnPosition,
 		Health = baseHealth,
 		MaxHealth = baseHealth,
 		Model = model,
+		-- Ability system defaults
+		LastAbilityTime = 0,
+		AuraActive = isAura or false,
+		StunnedUntil = 0,
+		SlowedUntil = 0,
+		SlowFactor = 1,
+		BuffExpires = 0,
+		BuffDamageMultiplier = 1,
+		DoTActive = false,
+		DoTExpires = 0,
+		DoTDPS = 0,
+		DoTRadius = 0,
+		ChargeReady = false,
+		ChargeDamageMultiplier = 1,
 	}
-
-	-- Store lane waypoints key on the instance for quick lookup.
-	-- We use LaneIndex as a lookup alias; the actual waypoints array is resolved in the movement loop.
-	-- (LaneIndex is currently unused beyond being part of the type; we keep it at 1.)
 
 	self._activeCreeps[id] = creep
 
@@ -327,7 +378,7 @@ end
 --------------------------------------------------------------------------------
 
 local function _getLaneKey(creep: CreepInstance): string
-	return if creep.TargetTeamId == 2 then "ToTeam2" else "ToTeam1"
+	return creep.LaneKey
 end
 
 --------------------------------------------------------------------------------
@@ -349,6 +400,134 @@ local function _moveModel(creep: CreepInstance, newPosition: Vector3)
 			child.CFrame = child.CFrame + delta
 		end
 	end
+end
+
+--------------------------------------------------------------------------------
+-- Visual effects: creep attack slash + gate tower projectile
+--------------------------------------------------------------------------------
+
+local function _playAttackEffect(attackerPos: Vector3, targetPos: Vector3, color: Color3)
+	local dir = targetPos - attackerPos
+	local dist = dir.Magnitude
+	if dist < 0.5 then
+		return
+	end
+
+	-- Slash arc near the target (visible neon swipe)
+	local slashPos = targetPos + Vector3.new(0, 2, 0) -- raise to body height
+	local slash = Instance.new("Part")
+	slash.Name = "CreepSlash"
+	slash.Size = Vector3.new(2.5, 0.4, 0.15)
+	slash.Anchored = true
+	slash.CanCollide = false
+	slash.Material = Enum.Material.Neon
+	slash.Color = color
+	slash.Transparency = 0.1
+	slash.CFrame = CFrame.lookAt(slashPos, slashPos + dir) * CFrame.Angles(0, 0, math.rad(math.random(-40, 40)))
+	slash.Parent = workspace
+
+	-- Quick expand and fade
+	task.spawn(function()
+		task.wait(0.1)
+		if slash.Parent then
+			slash.Size = Vector3.new(3.5, 0.6, 0.15)
+			slash.Transparency = 0.5
+		end
+		task.wait(0.15)
+		if slash.Parent then
+			slash:Destroy()
+		end
+	end)
+end
+
+-- Attack lunge: briefly move the creep model toward its target then snap back
+local function _playAttackLunge(creepModel: Model?, targetPos: Vector3)
+	if not creepModel then
+		return
+	end
+	local body = creepModel:FindFirstChild("Body") :: BasePart?
+	if not body then
+		return
+	end
+
+	local originalPos = body.Position
+	local dir = (targetPos - originalPos)
+	dir = Vector3.new(dir.X, 0, dir.Z) -- flatten Y
+	local lungeMag = dir.Magnitude
+	if lungeMag < 0.5 then
+		return
+	end
+	local lungeOffset = dir.Unit * math.min(lungeMag * 0.3, 2) -- lunge 30% of distance, max 2 studs
+
+	-- Move all parts forward
+	task.spawn(function()
+		for _, child in creepModel:GetChildren() do
+			if child:IsA("BasePart") then
+				child.CFrame = child.CFrame + lungeOffset
+			end
+		end
+		task.wait(0.1)
+		-- Snap back
+		if creepModel.Parent then
+			for _, child in creepModel:GetChildren() do
+				if child:IsA("BasePart") then
+					child.CFrame = child.CFrame - lungeOffset
+				end
+			end
+		end
+	end)
+end
+
+function CreepService:_fireGateProjectile(gateTeamId: number, targetPos: Vector3)
+	local now = os.clock()
+	local lastFire = self._lastGateFireTime[gateTeamId] or 0
+	if now - lastFire < GATE_FIRE_INTERVAL then
+		return
+	end
+	self._lastGateFireTime[gateTeamId] = now
+
+	local gatePos = MapConfig.GATE_POSITIONS[gateTeamId]
+	if not gatePos then
+		return
+	end
+
+	local orbPos = Vector3.new(gatePos.X, 10, gatePos.Z) -- orb sits at Y=10
+	local teamColor = MapConfig.TEAM_COLORS[gateTeamId]
+
+	local projectile = Instance.new("Part")
+	projectile.Name = "TowerShot"
+	projectile.Shape = Enum.PartType.Ball
+	projectile.Size = Vector3.new(1.5, 1.5, 1.5)
+	projectile.Position = orbPos
+	projectile.Anchored = true
+	projectile.CanCollide = false
+	projectile.Material = Enum.Material.Neon
+	projectile.Color = teamColor
+	projectile.Transparency = 0.1
+	projectile.Parent = workspace
+
+	local light = Instance.new("PointLight")
+	light.Range = 8
+	light.Brightness = 2
+	light.Color = teamColor
+	light.Parent = projectile
+
+	-- Animate projectile flight
+	task.spawn(function()
+		local flightTime = 0.35
+		local elapsed = 0
+		while elapsed < flightTime do
+			local dt = task.wait()
+			elapsed += dt
+			local alpha = math.min(elapsed / flightTime, 1)
+			projectile.Position = orbPos:Lerp(targetPos, alpha)
+		end
+		-- Impact flash
+		projectile.Size = Vector3.new(3, 3, 3)
+		projectile.Transparency = 0.5
+		task.wait(0.1)
+		projectile:Destroy()
+	end)
 end
 
 --------------------------------------------------------------------------------
@@ -399,6 +578,289 @@ function CreepService:_findNearestEnemy(creep: CreepInstance): CreepInstance?
 
 	return bestTarget
 end
+
+--------------------------------------------------------------------------------
+-- Ability system helpers
+--------------------------------------------------------------------------------
+
+function CreepService:_findEnemiesInRadius(creep: CreepInstance, radius: number, maxCount: number?): { CreepInstance }
+	local results: { CreepInstance } = {}
+	local limit = maxCount or 999
+
+	for _, other in self._activeCreeps do
+		if other.TeamId == creep.TeamId then
+			continue
+		end
+		if other.Health <= 0 then
+			continue
+		end
+		local dist = (other.Position - creep.Position).Magnitude
+		if dist <= radius then
+			table.insert(results, other)
+			if #results >= limit then
+				break
+			end
+		end
+	end
+
+	return results
+end
+
+function CreepService:_findAlliesInRadius(creep: CreepInstance, radius: number): { CreepInstance }
+	local results: { CreepInstance } = {}
+
+	for _, other in self._activeCreeps do
+		if other.TeamId ~= creep.TeamId then
+			continue
+		end
+		if other.Id == creep.Id then
+			continue
+		end
+		if other.Health <= 0 then
+			continue
+		end
+		local dist = (other.Position - creep.Position).Magnitude
+		if dist <= radius then
+			table.insert(results, other)
+		end
+	end
+
+	return results
+end
+
+--------------------------------------------------------------------------------
+-- Find nearest enemy hero (for creep-vs-hero combat)
+--------------------------------------------------------------------------------
+
+function CreepService:_findNearestEnemyHero(creep: CreepInstance): (Player?, number)
+	local bestDist = CREEP_HERO_AGGRO_RANGE
+	local bestPlayer: Player? = nil
+
+	local okTeam, teamService = pcall(function()
+		return Knit.GetService("TeamService")
+	end)
+	if not okTeam or not teamService then
+		return nil, 0
+	end
+
+	for _, player in Players:GetPlayers() do
+		local heroTeamId = teamService:GetTeam(player)
+		if not heroTeamId or heroTeamId == creep.TeamId then
+			continue
+		end
+
+		local character = player.Character
+		if not character then
+			continue
+		end
+		local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not rootPart then
+			continue
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+
+		local dist = (rootPart.Position - creep.Position).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestPlayer = player
+		end
+	end
+
+	return bestPlayer, bestDist
+end
+
+--------------------------------------------------------------------------------
+-- Ability execution
+--------------------------------------------------------------------------------
+
+function CreepService:_tryUseAbility(creep: CreepInstance, enemy: CreepInstance, now: number)
+	local creepDef = CreepData[creep.CreepId]
+	if not creepDef or not creepDef.Ability then
+		return
+	end
+
+	local ability = creepDef.Ability
+	-- Aura type is handled separately (passive, no cooldown)
+	if ability.Type == "Aura" then
+		return
+	end
+
+	local lastUse = creep.LastAbilityTime or 0
+	if now - lastUse < ability.Cooldown then
+		return
+	end
+
+	-- Ability is off cooldown -- execute it
+	creep.LastAbilityTime = now
+
+	local targetPos: Vector3 = enemy.Position
+
+	if ability.Type == "Stun" then
+		-- Shield Bash: stun the target
+		local stunUntil = now + ability.Value
+		-- Don't override a longer existing stun
+		if (enemy.StunnedUntil or 0) < stunUntil then
+			enemy.StunnedUntil = stunUntil
+		end
+
+	elseif ability.Type == "BonusDamage" then
+		-- Volley: deal bonus damage to primary target + 1 more nearby enemy
+		enemy.Health -= ability.Value
+		_updateHealthBar(enemy)
+		if enemy.Health <= 0 then
+			self:_onCreepKilledByCreep(enemy)
+		end
+
+		-- Find 1 additional enemy near the primary target
+		local secondaryTargets: { CreepInstance } = {}
+		for _, other in self._activeCreeps do
+			if other.TeamId == creep.TeamId or other.Id == enemy.Id then
+				continue
+			end
+			if other.Health <= 0 then
+				continue
+			end
+			local dist = (other.Position - enemy.Position).Magnitude
+			if dist <= ability.Radius then
+				table.insert(secondaryTargets, other)
+				if #secondaryTargets >= 1 then
+					break
+				end
+			end
+		end
+
+		for _, secondary in secondaryTargets do
+			secondary.Health -= ability.Value
+			_updateHealthBar(secondary)
+			if secondary.Health <= 0 then
+				self:_onCreepKilledByCreep(secondary)
+			end
+		end
+
+	elseif ability.Type == "BuffAllies" then
+		-- War Cry: buff nearby allies with +damage% for duration
+		local allies = self:_findAlliesInRadius(creep, ability.Radius)
+		local buffExpires = now + ability.Duration
+		local buffMult = 1 + ability.Value
+
+		for _, ally in allies do
+			ally.BuffExpires = buffExpires
+			ally.BuffDamageMultiplier = buffMult
+		end
+		-- Also buff self
+		creep.BuffExpires = buffExpires
+		creep.BuffDamageMultiplier = buffMult
+
+	elseif ability.Type == "Charge" then
+		-- Charge: prepare a powered-up next hit (2x damage)
+		creep.ChargeReady = true
+		creep.ChargeDamageMultiplier = ability.Value
+
+	elseif ability.Type == "Heal" then
+		-- Heal Wave: heal nearby allies
+		local allies = self:_findAlliesInRadius(creep, ability.Radius)
+		for _, ally in allies do
+			ally.Health = math.min(ally.Health + ability.Value, ally.MaxHealth)
+			_updateHealthBar(ally)
+		end
+		-- Also heal self
+		creep.Health = math.min(creep.Health + ability.Value, creep.MaxHealth)
+		_updateHealthBar(creep)
+
+	elseif ability.Type == "Slow" then
+		-- Ensnare: slow target
+		enemy.SlowedUntil = now + ability.Duration
+		enemy.SlowFactor = ability.Value
+
+	elseif ability.Type == "AoEDoT" then
+		-- Plague Cloud: activate damage-over-time field around this creep
+		creep.DoTActive = true
+		creep.DoTExpires = now + ability.Duration
+		creep.DoTDPS = ability.Value
+		creep.DoTRadius = ability.Radius
+
+	elseif ability.Type == "AoEBurst" then
+		-- Frost Breath: instant AoE damage + freeze (stun)
+		local enemies = self:_findEnemiesInRadius(creep, ability.Radius)
+		local stunUntil = now + ability.Duration
+
+		for _, target in enemies do
+			target.Health -= ability.Value
+			_updateHealthBar(target)
+			if target.Health <= 0 then
+				self:_onCreepKilledByCreep(target)
+			else
+				if (target.StunnedUntil or 0) < stunUntil then
+					target.StunnedUntil = stunUntil
+				end
+			end
+		end
+	end
+
+	-- Fire VFX signal to all clients
+	self.Client.CreepAbilityUsed:FireAll(creep.Id, ability.Name, creep.Position, targetPos)
+end
+
+--------------------------------------------------------------------------------
+-- Aura tick (Infernal Immolation Aura): passive DPS to nearby enemies
+--------------------------------------------------------------------------------
+
+function CreepService:_applyAuraDamage(creep: CreepInstance, dt: number)
+	local creepDef = CreepData[creep.CreepId]
+	if not creepDef or not creepDef.Ability then
+		return
+	end
+	local ability = creepDef.Ability
+	if ability.Type ~= "Aura" then
+		return
+	end
+
+	local enemies = self:_findEnemiesInRadius(creep, ability.Radius)
+	local tickDmg = ability.Value * dt
+
+	for _, target in enemies do
+		target.Health -= tickDmg
+		_updateHealthBar(target)
+		if target.Health <= 0 then
+			self:_onCreepKilledByCreep(target)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- AoE DoT tick (Plague Cloud active effect)
+--------------------------------------------------------------------------------
+
+function CreepService:_applyDoTDamage(creep: CreepInstance, now: number, dt: number)
+	if not creep.DoTActive then
+		return
+	end
+	if now > (creep.DoTExpires or 0) then
+		creep.DoTActive = false
+		return
+	end
+
+	local tickDmg = (creep.DoTDPS or 0) * dt
+	if tickDmg <= 0 then
+		return
+	end
+
+	local enemies = self:_findEnemiesInRadius(creep, creep.DoTRadius or 8)
+	for _, target in enemies do
+		target.Health -= tickDmg
+		_updateHealthBar(target)
+		if target.Health <= 0 then
+			self:_onCreepKilledByCreep(target)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Creep-vs-creep kill handler
+--------------------------------------------------------------------------------
 
 function CreepService:_onCreepKilledByCreep(creep: CreepInstance)
 	-- If a player recently damaged this creep, give them assist/kill credit
@@ -458,6 +920,9 @@ function CreepService:_runMovementLoop()
 					creep.Health -= effectiveDPS * dt
 					_updateHealthBar(creep)
 
+					-- Fire tower projectile (throttled visual)
+					self:_fireGateProjectile(creep.TargetTeamId, creep.Position)
+
 					if creep.Health <= 0 then
 						self:_onCreepKilledByGate(creep)
 						continue
@@ -465,21 +930,124 @@ function CreepService:_runMovementLoop()
 				end
 			end
 
+			-- Ability system: process passive effects (aura, DoT) ----------------
+			if creep.AuraActive then
+				self:_applyAuraDamage(creep, dt)
+			end
+			if creep.DoTActive then
+				self:_applyDoTDamage(creep, now, dt)
+			end
+
+			-- Expire buff if time is up
+			if (creep.BuffExpires or 0) > 0 and now >= (creep.BuffExpires or 0) then
+				creep.BuffExpires = 0
+				creep.BuffDamageMultiplier = 1
+			end
+
+			-- Expire slow if time is up
+			if (creep.SlowedUntil or 0) > 0 and now >= (creep.SlowedUntil or 0) then
+				creep.SlowedUntil = 0
+				creep.SlowFactor = 1
+			end
+
+			-- Stun check: skip all combat actions while stunned
+			local isStunned = (creep.StunnedUntil or 0) > now
+			if isStunned then
+				-- Expire stun when time is up (handled next tick)
+				-- Still apply separation so stunned creeps don't stack
+				local sep = self:_computeSeparation(creep, dt)
+				if sep.Magnitude > 0.01 then
+					creep.Position = creep.Position + sep
+				end
+				_moveModel(creep, creep.Position)
+				continue
+			end
+
+			-- Creep-vs-hero combat -----------------------------------------------
+			local heroTarget, heroDist = self:_findNearestEnemyHero(creep)
+			if heroTarget then
+				local lastAtk = creep.LastAttackTime or 0
+				if now - lastAtk >= CREEP_HERO_ATTACK_COOLDOWN then
+					creep.LastAttackTime = now
+
+					local dmgMult = (creep.DamageMultiplier or 1) * CREEP_HERO_DAMAGE_MULT
+					local variance = Constants.DAMAGE_VARIANCE
+					local dmg = (creepDef.Damage or 10) * dmgMult * (1 - variance + math.random() * variance * 2)
+
+					local okCombat, heroCombatService = pcall(function()
+						return Knit.GetService("HeroCombatService")
+					end)
+					if okCombat and heroCombatService then
+						heroCombatService:DamageHero(heroTarget, dmg)
+					end
+
+					-- Attack slash effect + lunge
+					local character = heroTarget.Character
+					local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+					if rootPart then
+						local attackColor = Color3.fromRGB(255, 80, 60)
+						_playAttackEffect(creep.Position, rootPart.Position, attackColor)
+						_playAttackLunge(creep.Model, rootPart.Position)
+					end
+				end
+
+				-- Move toward the hero if not in melee standoff range
+				if heroDist > CREEP_MELEE_STANDOFF then
+					local character = heroTarget.Character
+					local rootPart = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+					if rootPart then
+						local dir = (rootPart.Position - creep.Position).Unit
+						local moveDistance = creepDef.MoveSpeed * (creep.SpeedMultiplier or 1) * dt
+						creep.Position = creep.Position + dir * moveDistance * 0.5
+					end
+				end
+
+				local sep = self:_computeSeparation(creep, dt)
+				if sep.Magnitude > 0.01 then
+					creep.Position = creep.Position + sep
+				end
+				_moveModel(creep, creep.Position)
+				continue
+			end
+
 			-- Creep-vs-creep combat ----------------------------------------------
 			local enemy = self:_findNearestEnemy(creep)
 			if enemy then
+				-- Try to use special ability (if off cooldown)
+				self:_tryUseAbility(creep, enemy, now)
+
 				local lastAtk = creep.LastAttackTime or 0
 				if now - lastAtk >= CREEP_ATTACK_COOLDOWN then
 					creep.LastAttackTime = now
-					local dmg = (creepDef.Damage or 10) * (creep.DamageMultiplier or 1)
+
+					-- Calculate damage with buff and charge multipliers
+					local dmgMult = creep.DamageMultiplier or 1
+					-- Active buff (War Cry)
+					if (creep.BuffExpires or 0) > now then
+						dmgMult = dmgMult * (creep.BuffDamageMultiplier or 1)
+					end
+					-- Charge bonus (Knight: one-time 2x on next hit)
+					if creep.ChargeReady then
+						dmgMult = dmgMult * (creep.ChargeDamageMultiplier or 1)
+						creep.ChargeReady = false
+						creep.ChargeDamageMultiplier = 1
+					end
+
+					local cVariance = Constants.DAMAGE_VARIANCE
+					local dmg = (creepDef.Damage or 10) * dmgMult * (1 - cVariance + math.random() * cVariance * 2)
 					enemy.Health -= dmg
 					_updateHealthBar(enemy)
+
+					-- Attack slash effect + lunge (team-colored)
+					local slashColor = MapConfig.TEAM_COLORS[creep.TeamId] or Color3.new(1, 1, 1)
+					_playAttackEffect(creep.Position, enemy.Position, slashColor)
+					_playAttackLunge(creep.Model, enemy.Position)
 
 					if enemy.Health <= 0 then
 						self:_onCreepKilledByCreep(enemy)
 					end
 				end
-				-- Engaged in combat — apply separation so creeps spread out
+				-- Engaged in combat -- apply separation so creeps spread out
 				local sep = self:_computeSeparation(creep, dt)
 				if sep.Magnitude > 0.01 then
 					creep.Position = creep.Position + sep
@@ -513,7 +1081,12 @@ function CreepService:_runMovementLoop()
 			else
 				-- Move toward waypoint (primarily along Z, keeping X offset)
 				local direction = offset.Unit
-				local moveDistance = creepDef.MoveSpeed * (creep.SpeedMultiplier or 1) * dt
+				-- Apply slow debuff: SlowFactor < 1 means reduced speed
+				local slowMult = 1
+				if (creep.SlowedUntil or 0) > now and (creep.SlowFactor or 1) < 1 then
+					slowMult = creep.SlowFactor or 1
+				end
+				local moveDistance = creepDef.MoveSpeed * (creep.SpeedMultiplier or 1) * slowMult * dt
 				-- Clamp so we don't overshoot
 				if moveDistance > distToWaypoint then
 					moveDistance = distToWaypoint
@@ -538,6 +1111,12 @@ end
 --------------------------------------------------------------------------------
 
 function CreepService:_onCreepReachedBase(creep: CreepInstance)
+	-- Defensive waves (targetTeamId == 0) just despawn at end of their path
+	if creep.TargetTeamId == 0 then
+		self:_destroyCreep(creep.Id)
+		return
+	end
+
 	local creepDef = CreepData[creep.CreepId]
 	if not creepDef then
 		self:_destroyCreep(creep.Id)
@@ -720,63 +1299,70 @@ function CreepService:_destroyCreep(creepId: number)
 end
 
 --------------------------------------------------------------------------------
--- AI Wave System — spawns creeps for teams with no human players
+-- AI Attacker — simulates an opponent sending attack creeps
 --------------------------------------------------------------------------------
 
-local AI_WAVE_INTERVAL = 12
-local AI_WAVE_SIZE = 4
-local AI_SPAWN_DELAY = 0.4
+local AI_ATTACK_INTERVAL = 6 -- seconds between AI sends
+local AI_SPAWN_DELAY = 0.25
 
--- Escalation schedule: { maxElapsed, creepId }
-local AI_ESCALATION = {
-	{ 60, "Footman" },
-	{ 120, "Grunt" },
-	{ 240, "Knight" },
-	-- After 240s → Abomination (fallback)
+-- Escalation schedule: { maxElapsed, creepId, count }
+local AI_ATTACK_ESCALATION = {
+	{ 30, "Footman", 1 },
+	{ 60, "Footman", 2 },
+	{ 90, "Grunt", 1 },
+	{ 130, "Grunt", 2 },
+	{ 180, "Knight", 1 },
+	{ 240, "Knight", 2 },
+	-- After 240s → Abomination
 }
 
-local function _pickAICreep(elapsed: number): string
-	for _, entry in AI_ESCALATION do
+local function _pickAIAttack(elapsed: number): (string, number)
+	for _, entry in AI_ATTACK_ESCALATION do
 		if elapsed < entry[1] then
-			return entry[2]
+			return entry[2], entry[3]
 		end
 	end
-	return "Abomination"
+	return "Abomination", 1
 end
 
-function CreepService:StartAIWaves()
+function CreepService:StartAIAttacker()
 	self._aiActive = true
 	self._aiStartTime = os.clock()
 	task.spawn(function()
-		self:_runAIWaveLoop()
+		self:_runAIAttackerLoop()
 	end)
 end
 
-function CreepService:StopAIWaves()
+function CreepService:StopAIAttacker()
 	self._aiActive = false
 end
 
-function CreepService:_runAIWaveLoop()
+function CreepService:_runAIAttackerLoop()
 	while self._aiActive do
-		task.wait(AI_WAVE_INTERVAL)
+		task.wait(AI_ATTACK_INTERVAL)
 		if not self._aiActive then
 			break
 		end
 
 		local elapsed = os.clock() - self._aiStartTime
-		local creepId = _pickAICreep(elapsed)
+		local creepId, count = _pickAIAttack(elapsed)
 
-		-- Spawn AI waves for BOTH teams so creeps clash in the lane
-		for teamId = 1, 2 do
-			local targetTeamId = if teamId == 1 then 2 else 1
-			local laneKey = if targetTeamId == 2 then "ToTeam2" else "ToTeam1"
+		-- Find which teams have human players and attack them
+		local TeamService = Knit.GetService("TeamService")
+		for targetTeamId = 1, 2 do
+			local teamPlayers = TeamService:GetTeamPlayers(targetTeamId)
+			if #teamPlayers > 0 then
+				-- AI attacks this team's lane (creeps march toward their base)
+				local attackerTeamId = if targetTeamId == 1 then 2 else 1
+				local laneKey = "AttackTeam" .. tostring(targetTeamId)
 
-			for i = 1, AI_WAVE_SIZE do
-				task.delay((i - 1) * AI_SPAWN_DELAY, function()
-					if self._aiActive then
-						self:_createCreep(creepId, 0, teamId, targetTeamId, laneKey, 1)
-					end
-				end)
+				for i = 1, count do
+					task.delay((i - 1) * AI_SPAWN_DELAY, function()
+						if self._aiActive then
+							self:_createCreep(creepId, 0, attackerTeamId, targetTeamId, laneKey, 1)
+						end
+					end)
+				end
 			end
 		end
 	end

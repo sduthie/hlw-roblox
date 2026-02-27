@@ -5,6 +5,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HeroData = require(ReplicatedStorage.Shared.HeroData)
 local CreepData = require(ReplicatedStorage.Shared.CreepData)
 local ItemData = require(ReplicatedStorage.Shared.ItemData)
+local UpgradeData = require(ReplicatedStorage.Shared.UpgradeData)
+local MedicalData = require(ReplicatedStorage.Shared.MedicalData)
+local FamiliarData = require(ReplicatedStorage.Shared.FamiliarData)
 
 local RemoteValidator = {}
 
@@ -38,8 +41,20 @@ function RemoteValidator.isValidItemId(value: any): boolean
 	return type(value) == "string" and ItemData[value] ~= nil
 end
 
+function RemoteValidator.isValidUpgradeId(value: any): boolean
+	return type(value) == "string" and UpgradeData[value] ~= nil
+end
+
 function RemoteValidator.isValidTeamId(value: any): boolean
 	return type(value) == "number" and (value == 1 or value == 2)
+end
+
+function RemoteValidator.isValidMedicalId(value: any): boolean
+	return type(value) == "string" and MedicalData[value] ~= nil
+end
+
+function RemoteValidator.isValidFamiliarId(value: any): boolean
+	return type(value) == "string" and FamiliarData[value] ~= nil
 end
 
 -- Rate limiting: returns true if allowed, false if throttled
