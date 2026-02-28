@@ -85,6 +85,14 @@ function HUDController:KnitStart()
 		end
 	end)
 
+	-- Connect pet/elemental attack signals for floating damage
+	local AbilityService = Knit.GetService("AbilityService")
+	AbilityService.ElementalAttack:Connect(function(_fromPos: Vector3, toPos: Vector3, damage: number, killed: boolean)
+		if damage and damage > 0 then
+			self:_showFloatingDamage(toPos, damage, killed)
+		end
+	end)
+
 	-- Connect kill reward signal (fires for hero kills AND assist kills)
 	local CreepService = Knit.GetService("CreepService")
 	CreepService.CreepKillReward:Connect(function(creepPosition: Vector3, bountyGold: number, xpGained: number)

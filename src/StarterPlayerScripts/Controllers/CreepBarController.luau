@@ -50,11 +50,11 @@ local HOTKEYS = {
 --------------------------------------------------------------------------------
 
 function CreepBarController:KnitInit()
-	-- CreepBar disabled — use shop panel (B key) instead
+	-- CreepBar disabled — use shop building clicks instead
 end
 
 function CreepBarController:KnitStart()
-	-- CreepBar disabled — use shop panel (B key) instead
+	-- CreepBar disabled — use shop building clicks instead
 end
 
 --------------------------------------------------------------------------------

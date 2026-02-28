@@ -33,8 +33,8 @@ ShopController._screenGui = nil :: ScreenGui?
 ShopController._currentTier = 1 :: number
 ShopController._scrollingFrame = nil :: ScrollingFrame?
 ShopController._activeTab = "Creeps" :: string
-ShopController._tabButtons = {} :: { [string]: TextButton }
 ShopController._upgradeLevels = {} :: { [string]: number }
+ShopController._titleLabel = nil :: TextLabel?
 ShopController._currentGold = 0 :: number
 ShopController._creepCosts = {} :: { [string]: number } -- creepId -> current escalated cost
 ShopController._medicalButtons = {} :: { [string]: TextButton }
@@ -47,8 +47,9 @@ ShopController._statusTween = nil :: Tween?
 --------------------------------------------------------------------------------
 
 local PANEL_WIDTH = 300
-local PANEL_OFFSCREEN = UDim2.new(1, 0, 0, 0)
-local PANEL_ONSCREEN = UDim2.new(1, -PANEL_WIDTH, 0, 0)
+local PANEL_HEIGHT = 450
+local PANEL_OFFSCREEN = UDim2.new(0, -PANEL_WIDTH - 10, 1, -PANEL_HEIGHT - 95)
+local PANEL_ONSCREEN = UDim2.new(0, 8, 1, -PANEL_HEIGHT - 95)
 local TWEEN_TIME = 0.3
 local TWEEN_INFO_OPEN = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local TWEEN_INFO_CLOSE = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -63,8 +64,6 @@ local COLOR_WHITE = Color3.fromRGB(255, 255, 255)
 local COLOR_SEPARATOR = Color3.fromRGB(80, 80, 80)
 local COLOR_GOLD_TEXT = Color3.fromRGB(255, 215, 80)
 local COLOR_INCOME_TEXT = Color3.fromRGB(130, 220, 130)
-local COLOR_TAB_ACTIVE = Color3.fromRGB(70, 70, 80)
-local COLOR_TAB_INACTIVE = Color3.fromRGB(40, 40, 45)
 local COLOR_ECON = Color3.fromRGB(80, 160, 80)
 local COLOR_HERO = Color3.fromRGB(80, 120, 200)
 local COLOR_MINION = Color3.fromRGB(200, 120, 60)
@@ -77,7 +76,15 @@ local COLOR_ITEM = Color3.fromRGB(200, 180, 60)
 local COLOR_MEDICAL = Color3.fromRGB(80, 200, 120) -- green for medical
 local COLOR_FAMILIAR = Color3.fromRGB(180, 100, 220) -- purple for familiars
 local COLOR_PREMIUM = Color3.fromRGB(255, 180, 50) -- gold for premium items
-local TABS = { "Creeps", "Items", "Medical", "Familiar", "Upgrades" }
+
+-- Map tab name -> building title shown in panel header
+local TAB_TITLES = {
+	Creeps = "BARRACKS",
+	Items = "ARMORY",
+	Medical = "APOTHECARY",
+	Familiar = "MENAGERIE",
+	Upgrades = "FORGE",
+}
 
 local CATEGORY_COLORS = {
 	Economy = COLOR_ECON,
@@ -179,41 +186,72 @@ end
 -- Public API
 --------------------------------------------------------------------------------
 
-function ShopController:ToggleShop()
+function ShopController:OpenToTab(tabName: string)
 	if not self._shopFrame then
-		warn("[ShopController] ToggleShop: _shopFrame is nil")
+		warn("[ShopController] OpenToTab: _shopFrame is nil")
 		return
 	end
 
-	self._shopOpen = not self._shopOpen
+	self._shopOpen = true
+	self._activeTab = tabName
 
-	if self._shopOpen then
-		-- Wrap content refresh in pcall so panel still opens even if content fails
-		local ok, err = pcall(function()
-			self:_refreshContent()
-		end)
-		if not ok then
-			warn("[ShopController] _refreshContent error:", err)
+	-- Set panel title to building name
+	if self._titleLabel then
+		self._titleLabel.Text = TAB_TITLES[tabName] or tabName
+	end
+
+	-- TownHall button only visible for BARRACKS (Creeps tab)
+	local showTownHall = (tabName == "Creeps")
+	if self._townHallButton then
+		self._townHallButton.Visible = showTownHall
+	end
+
+	-- Adjust scroll area position based on TownHall visibility
+	if self._scrollingFrame then
+		if showTownHall then
+			self._scrollingFrame.Position = UDim2.new(0, 8, 0, 86)
+			self._scrollingFrame.Size = UDim2.new(1, -16, 1, -114)
+		else
+			self._scrollingFrame.Position = UDim2.new(0, 8, 0, 40)
+			self._scrollingFrame.Size = UDim2.new(1, -16, 1, -68)
 		end
+	end
 
+	-- Refresh content for the target tab
+	local ok, err = pcall(function()
+		self:_refreshContent()
+	end)
+	if not ok then
+		warn("[ShopController] _refreshContent error:", err)
+	end
+
+	if showTownHall then
 		local ok2, err2 = pcall(function()
 			self:_updateTownHallButton()
 		end)
 		if not ok2 then
 			warn("[ShopController] _updateTownHallButton error:", err2)
 		end
-
-		local tween = TweenService:Create(self._shopFrame, TWEEN_INFO_OPEN, {
-			Position = PANEL_ONSCREEN,
-		})
-		tween:Play()
-	else
-		local tween = TweenService:Create(self._shopFrame, TWEEN_INFO_CLOSE, {
-			Position = PANEL_OFFSCREEN,
-		})
-		tween:Play()
 	end
+
+	local tween = TweenService:Create(self._shopFrame, TWEEN_INFO_OPEN, {
+		Position = PANEL_ONSCREEN,
+	})
+	tween:Play()
 end
+
+function ShopController:CloseShop()
+	if not self._shopFrame then
+		return
+	end
+
+	self._shopOpen = false
+	local tween = TweenService:Create(self._shopFrame, TWEEN_INFO_CLOSE, {
+		Position = PANEL_OFFSCREEN,
+	})
+	tween:Play()
+end
+
 
 --------------------------------------------------------------------------------
 -- Shop Building Interaction
@@ -245,14 +283,13 @@ function ShopController:_connectShopPrompts()
 
 		-- Route to correct tab based on ShopType
 		local shopType = shopPart:GetAttribute("ShopType")
-		if shopType then
-			local targetTab = tabMap[shopType] or "Creeps"
-			if not self._shopOpen then
-				self:ToggleShop()
-			end
-			self:_switchTab(targetTab)
+		local targetTab = if shopType then (tabMap[shopType] or "Creeps") else "Creeps"
+
+		-- Toggle: click same building again to close
+		if self._shopOpen and self._activeTab == targetTab then
+			self:CloseShop()
 		else
-			self:ToggleShop()
+			self:OpenToTab(targetTab)
 		end
 	end
 
@@ -324,40 +361,6 @@ function ShopController:_connectShopPrompts()
 end
 
 --------------------------------------------------------------------------------
--- Persistent HUD shop button (always visible, always works)
---------------------------------------------------------------------------------
-
-function ShopController:_createShopButton()
-	local screenGui = self._screenGui
-	if not screenGui then
-		return
-	end
-
-	local btn = Instance.new("TextButton")
-	btn.Name = "ShopToggleBtn"
-	btn.Size = UDim2.new(0, 70, 0, 28)
-	btn.Position = UDim2.new(1, -80, 0, 44)
-	btn.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
-	btn.BackgroundTransparency = 0.2
-	btn.BorderSizePixel = 0
-	btn.Text = "SHOP [B]"
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 12
-	btn.TextColor3 = Color3.fromRGB(255, 215, 80)
-	btn.AutoButtonColor = true
-	btn.ZIndex = 10
-	btn.Parent = screenGui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = btn
-
-	btn.Activated:Connect(function()
-		self:ToggleShop()
-	end)
-end
-
---------------------------------------------------------------------------------
 -- UI Creation
 --------------------------------------------------------------------------------
 
@@ -374,10 +377,10 @@ function ShopController:_createShopUI()
 	screenGui.Parent = player.PlayerGui
 	self._screenGui = screenGui
 
-	-- Shop panel frame
+	-- Shop panel frame (compact, bottom-left)
 	local shopFrame = Instance.new("Frame")
 	shopFrame.Name = "ShopPanel"
-	shopFrame.Size = UDim2.new(0, PANEL_WIDTH, 1, -95)
+	shopFrame.Size = UDim2.new(0, PANEL_WIDTH, 0, PANEL_HEIGHT)
 	shopFrame.Position = PANEL_OFFSCREEN
 	shopFrame.BackgroundColor3 = COLOR_PANEL_BG
 	shopFrame.BackgroundTransparency = 0.1
@@ -389,61 +392,45 @@ function ShopController:_createShopUI()
 	panelCorner.CornerRadius = UDim.new(0, 8)
 	panelCorner.Parent = shopFrame
 
-	-- Title
+	-- Title (shows building name: ARMORY, APOTHECARY, etc.)
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Name = "Title"
-	titleLabel.Size = UDim2.new(1, 0, 0, 36)
+	titleLabel.Size = UDim2.new(1, -36, 0, 32)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "SHOP [B]"
+	titleLabel.Text = "SHOP"
 	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.TextSize = 22
+	titleLabel.TextSize = 18
 	titleLabel.TextColor3 = COLOR_WHITE
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 	titleLabel.Parent = shopFrame
+	self._titleLabel = titleLabel
 
-	-- Tab bar
-	local tabBar = Instance.new("Frame")
-	tabBar.Name = "TabBar"
-	tabBar.Size = UDim2.new(1, -8, 0, 30)
-	tabBar.Position = UDim2.new(0, 4, 0, 36)
-	tabBar.BackgroundTransparency = 1
-	tabBar.Parent = shopFrame
+	-- Close button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseBtn"
+	closeBtn.Size = UDim2.new(0, 28, 0, 28)
+	closeBtn.Position = UDim2.new(1, -31, 0, 2)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Text = "X"
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 14
+	closeBtn.TextColor3 = COLOR_WHITE
+	closeBtn.AutoButtonColor = true
+	closeBtn.Parent = shopFrame
 
-	local tabLayout = Instance.new("UIListLayout")
-	tabLayout.FillDirection = Enum.FillDirection.Horizontal
-	tabLayout.Padding = UDim.new(0, 2)
-	tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	tabLayout.Parent = tabBar
+	local closeBtnCorner = Instance.new("UICorner")
+	closeBtnCorner.CornerRadius = UDim.new(0, 6)
+	closeBtnCorner.Parent = closeBtn
 
-	for i, tabName in TABS do
-		local tabBtn = Instance.new("TextButton")
-		tabBtn.Name = "Tab_" .. tabName
-		tabBtn.Size = UDim2.new(0, 38, 1, 0)
-		tabBtn.BackgroundColor3 = if tabName == self._activeTab then COLOR_TAB_ACTIVE else COLOR_TAB_INACTIVE
-		tabBtn.BorderSizePixel = 0
-		tabBtn.Text = tabName
-		tabBtn.Font = Enum.Font.GothamBold
-		tabBtn.TextSize = 9
-		tabBtn.TextColor3 = COLOR_WHITE
-		tabBtn.LayoutOrder = i
-		tabBtn.AutoButtonColor = false
-		tabBtn.Parent = tabBar
-		self._tabButtons[tabName] = tabBtn
-
-		local tabCorner = Instance.new("UICorner")
-		tabCorner.CornerRadius = UDim.new(0, 5)
-		tabCorner.Parent = tabBtn
-
-		tabBtn.Activated:Connect(function()
-			self:_switchTab(tabName)
-		end)
-	end
+	closeBtn.Activated:Connect(function()
+		self:CloseShop()
+	end)
 
 	-- Separator
 	local separator = Instance.new("Frame")
 	separator.Size = UDim2.new(1, -16, 0, 1)
-	separator.Position = UDim2.new(0, 8, 0, 70)
+	separator.Position = UDim2.new(0, 8, 0, 34)
 	separator.BackgroundColor3 = COLOR_SEPARATOR
 	separator.BorderSizePixel = 0
 	separator.Parent = shopFrame
@@ -464,19 +451,20 @@ function ShopController:_createShopUI()
 	statusLabel.Parent = shopFrame
 	self._statusLabel = statusLabel
 
-	-- TownHall upgrade button
+	-- TownHall upgrade button (only visible on Creeps/BARRACKS)
 	local townHallButton = Instance.new("TextButton")
 	townHallButton.Name = "TownHallUpgrade"
-	townHallButton.Size = UDim2.new(1, -16, 0, 44)
-	townHallButton.Position = UDim2.new(0, 8, 0, 78)
+	townHallButton.Size = UDim2.new(1, -16, 0, 40)
+	townHallButton.Position = UDim2.new(0, 8, 0, 40)
 	townHallButton.BackgroundColor3 = COLOR_TOWNHALL
 	townHallButton.BorderSizePixel = 0
 	townHallButton.Text = ""
 	townHallButton.Font = Enum.Font.GothamBold
-	townHallButton.TextSize = 14
+	townHallButton.TextSize = 13
 	townHallButton.TextColor3 = COLOR_WHITE
 	townHallButton.TextWrapped = true
 	townHallButton.AutoButtonColor = true
+	townHallButton.Visible = false
 	townHallButton.Parent = shopFrame
 	self._townHallButton = townHallButton
 
@@ -491,8 +479,8 @@ function ShopController:_createShopUI()
 	-- Scroll area
 	local scrollFrame = Instance.new("ScrollingFrame")
 	scrollFrame.Name = "ContentList"
-	scrollFrame.Size = UDim2.new(1, -16, 1, -134)
-	scrollFrame.Position = UDim2.new(0, 8, 0, 128)
+	scrollFrame.Size = UDim2.new(1, -16, 1, -68)
+	scrollFrame.Position = UDim2.new(0, 8, 0, 40)
 	scrollFrame.BackgroundTransparency = 1
 	scrollFrame.BorderSizePixel = 0
 	scrollFrame.ScrollBarThickness = 4
@@ -506,23 +494,6 @@ function ShopController:_createShopUI()
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	listLayout.Padding = UDim.new(0, 4)
 	listLayout.Parent = scrollFrame
-
-	self:_updateTownHallButton()
-end
-
---------------------------------------------------------------------------------
--- Tab Switching
---------------------------------------------------------------------------------
-
-function ShopController:_switchTab(tabName: string)
-	self._activeTab = tabName
-
-	-- Update tab button colors
-	for name, btn in self._tabButtons do
-		btn.BackgroundColor3 = if name == tabName then COLOR_TAB_ACTIVE else COLOR_TAB_INACTIVE
-	end
-
-	self:_refreshContent()
 end
 
 function ShopController:_refreshContent()
@@ -1517,10 +1488,6 @@ function ShopController:_onTownHallClicked()
 	end
 end
 
--- Keep old method name for compatibility
-function ShopController:_refreshCreepList()
-	self:_refreshContent()
-end
 
 --------------------------------------------------------------------------------
 -- Visual Feedback

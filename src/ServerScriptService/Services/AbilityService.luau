@@ -714,8 +714,8 @@ function AbilityService:_executeSummon(player: Player, abilityDef: any, abilityL
 				end
 				if nearestInRange and now - petState.LastAttackTime >= attackCooldown then
 					petState.LastAttackTime = now
-					CreepService:DamageCreep(nearestInRange.Id, petState.Damage, player)
-					self.Client.ElementalAttack:FireAll(body.Position, nearestInRange.Position)
+					local petKilled = CreepService:DamageCreep(nearestInRange.Id, petState.Damage, player)
+					self.Client.ElementalAttack:FireAll(body.Position, nearestInRange.Position, petState.Damage, petKilled)
 				end
 
 			-- Move-to mode: walk to target position, then resume auto-targeting
@@ -741,8 +741,8 @@ function AbilityService:_executeSummon(player: Player, abilityDef: any, abilityL
 					if dist <= attackRange then
 						if now - petState.LastAttackTime >= attackCooldown then
 							petState.LastAttackTime = now
-							CreepService:DamageCreep(targetCreep.Id, petState.Damage, player)
-							self.Client.ElementalAttack:FireAll(body.Position, targetCreep.Position)
+							local petKilled2 = CreepService:DamageCreep(targetCreep.Id, petState.Damage, player)
+							self.Client.ElementalAttack:FireAll(body.Position, targetCreep.Position, petState.Damage, petKilled2)
 						end
 					else
 						local dir = (targetCreep.Position - currentPos).Unit
@@ -775,8 +775,8 @@ function AbilityService:_executeSummon(player: Player, abilityDef: any, abilityL
 					if nearestDist <= attackRange then
 						if now - petState.LastAttackTime >= attackCooldown then
 							petState.LastAttackTime = now
-							CreepService:DamageCreep(nearestCreep.Id, petState.Damage, player)
-							self.Client.ElementalAttack:FireAll(body.Position, nearestCreep.Position)
+							local petKilled3 = CreepService:DamageCreep(nearestCreep.Id, petState.Damage, player)
+							self.Client.ElementalAttack:FireAll(body.Position, nearestCreep.Position, petState.Damage, petKilled3)
 						end
 					else
 						local dir = (nearestCreep.Position - currentPos).Unit

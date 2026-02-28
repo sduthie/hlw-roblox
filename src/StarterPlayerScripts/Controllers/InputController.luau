@@ -2,7 +2,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
@@ -18,10 +17,6 @@ local InputController = Knit.CreateController({
 --------------------------------------------------------------------------------
 -- State
 --------------------------------------------------------------------------------
-
-InputController._keybinds = {
-	ToggleShop = Enum.KeyCode.B,
-}
 
 InputController._moveIndicator = nil :: Part?
 InputController._raycastParams = nil :: RaycastParams?
@@ -112,18 +107,13 @@ function InputController:_updateRaycastFilter()
 end
 
 --------------------------------------------------------------------------------
--- Ability keybinds (Q/W/E/R + B for shop)
+-- Ability keybinds (Q/W/E/R)
 --------------------------------------------------------------------------------
 
 function InputController:_bindAbilities()
 	-- NOTE: Q/W/E/R ability casting is handled by SkillBarController via UserInputService
 	-- (supports ground targeting, pet commands, etc.)
-	-- Only bind shop toggle here since InputController owns the shop interaction
-	ContextActionService:BindAction("ToggleShop", function(_, state)
-		if state == Enum.UserInputState.Begin then
-			self:_onToggleShop()
-		end
-	end, false, self._keybinds.ToggleShop)
+	-- Shop is opened by clicking buildings directly, not a keybind
 end
 
 --------------------------------------------------------------------------------
@@ -134,6 +124,13 @@ end
 
 function InputController:_bindMouseActions()
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		-- Left-click: always check for shop building clicks (BillboardGui signs
+		-- set gameProcessed=true, but we still need to detect building clicks)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self:_onLeftClick()
+			return
+		end
+
 		if gameProcessed then
 			return
 		end
@@ -142,11 +139,6 @@ function InputController:_bindMouseActions()
 		if input.UserInputType == Enum.UserInputType.MouseButton2
 			or input.UserInputType == Enum.UserInputType.Touch then
 			self:_onContextualClick()
-		end
-
-		-- Left-click: shop interaction only (desktop)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			self:_onLeftClick()
 		end
 	end)
 end
@@ -355,23 +347,20 @@ function InputController:_checkShopClick(instance: Instance): boolean
 	local shopController = Knit.GetController("ShopController")
 	local shopType = shopPart:GetAttribute("ShopType")
 
-	if shopType then
-		local tabMap = {
-			Gear = "Items",
-			Medical = "Medical",
-			Familiar = "Familiar",
-			Upgrades = "Upgrades",
-			Creeps = "Creeps",
-		}
-		local targetTab = tabMap[shopType] or "Creeps"
-		if not shopController._shopOpen then
-			shopController:ToggleShop()
-		end
-		shopController:_switchTab(targetTab)
+	local tabMap = {
+		Gear = "Items",
+		Medical = "Medical",
+		Familiar = "Familiar",
+		Upgrades = "Upgrades",
+		Creeps = "Creeps",
+	}
+	local targetTab = if shopType then (tabMap[shopType] or "Creeps") else "Creeps"
+
+	-- Toggle: if already open to this tab, close. Otherwise open to tab.
+	if shopController._shopOpen and shopController._activeTab == targetTab then
+		shopController:CloseShop()
 	else
-		if not shopController._shopOpen then
-			shopController:ToggleShop()
-		end
+		shopController:OpenToTab(targetTab)
 	end
 	return true
 end
@@ -472,15 +461,6 @@ function InputController:_clampToLane(pos: Vector3): Vector3
 		pos.Y,
 		pos.Z
 	)
-end
-
---------------------------------------------------------------------------------
--- Ability / Shop callbacks
---------------------------------------------------------------------------------
-
-function InputController:_onToggleShop()
-	local shopController = Knit.GetController("ShopController")
-	shopController:ToggleShop()
 end
 
 return InputController
